@@ -1,0 +1,2853 @@
+<!DOCTYPE html>
+<html lang="pl" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>MES 2D — Analiza konstrukcji prętowych</title>
+<style>
+  :root{
+    --bg-canvas:#eef2f6;
+    --grid-line:#dbe3ea;
+    --grid-line-major:#c3ced9;
+    --toolbar-bg:#1b2430;
+    --toolbar-bg2:#232e3d;
+    --toolbar-fg:#e8edf3;
+    --accent:#2563eb;
+    --accent-dark:#1d4ed8;
+    --accent-soft:#dbeafe;
+    --sidebar-bg:#ffffff;
+    --sidebar-border:#e2e8f0;
+    --text:#1a2433;
+    --text-dim:#5c6b7a;
+    --danger:#dc2626;
+    --ok:#16a34a;
+    --n-color:#16a34a;
+    --t-color:#ea580c;
+    --m-color:#dc2626;
+    --s-color:#9333ea;
+    --def-color:#7c3aed;
+    --react-color:#d97706;
+    --surface:#ffffff;
+    --surface-2:#f8fafc;
+    --surface-border:#e2e8f0;
+    --surface-border-soft:#edf1f5;
+    --surface-translucent:#ffffffee;
+    --input-border:#d7dee6;
+    --input-bg:#ffffff;
+    --panel-gutter:#f1f5f9;
+    --ink:#334155;
+    --ink-soft:#64748b;
+    --axis-color:#aeb9c4;
+    --mono: 'SF Mono','Cascadia Code','Consolas','Roboto Mono',monospace;
+    --sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  }
+  html[data-theme="dark"]{
+    --bg-canvas:#0e1520;
+    --grid-line:#1b2634;
+    --grid-line-major:#28384a;
+    --accent-soft:#1e3a5f;
+    --sidebar-bg:#141b26;
+    --sidebar-border:#26333f;
+    --text:#e7edf5;
+    --text-dim:#8fa0b3;
+    --surface:#1a2330;
+    --surface-2:#1c2632;
+    --surface-border:#2a3947;
+    --surface-border-soft:#243141;
+    --surface-translucent:#141b26ee;
+    --input-border:#33465a;
+    --input-bg:#1a2330;
+    --panel-gutter:#0e141d;
+    --ink:#cbd5e1;
+    --ink-soft:#94a3b8;
+    --axis-color:#3d5164;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;font-family:var(--sans);color:var(--text);}
+  #app{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden;}
+
+  /* ---------- Toolbar ---------- */
+  #toolbar{
+    background:linear-gradient(180deg,var(--toolbar-bg),var(--toolbar-bg2));
+    color:var(--toolbar-fg);
+    display:flex;align-items:center;gap:4px;
+    padding:6px 10px;flex-wrap:wrap;
+    border-bottom:1px solid #0d141d;
+    z-index:20;
+  }
+  .tb-group{display:flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid #364353;}
+  .tb-group:last-child{border-right:none;}
+  .tb-btn{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    background:transparent;border:1px solid transparent;color:var(--toolbar-fg);
+    padding:5px 9px;border-radius:6px;cursor:pointer;font-size:10.5px;font-family:var(--sans);
+    min-width:52px;line-height:1.1;white-space:nowrap;
+  }
+  .tb-btn svg{width:18px;height:18px;stroke:var(--toolbar-fg);fill:none;stroke-width:1.7;}
+  .tb-btn:hover{background:#31415780;}
+  .tb-btn.active{background:var(--accent);border-color:var(--accent-dark);color:#fff;}
+  .tb-btn.active svg{stroke:#fff;}
+  .tb-btn:disabled{opacity:.35;cursor:not-allowed;}
+  .tb-btn.primary{background:var(--accent);}
+  .tb-btn.primary:hover{background:var(--accent-dark);}
+  .tb-sep{width:1px;align-self:stretch;background:#364353;margin:0 4px;}
+  .tb-select{background:#2a3644;color:var(--toolbar-fg);border:1px solid #3d4c5e;border-radius:5px;
+    font-size:11px;padding:4px 6px;max-width:150px;}
+  .tb-label{font-size:9.5px;color:#9fb0c3;text-transform:uppercase;letter-spacing:.04em;margin-right:2px;}
+
+  /* ---------- Main layout ---------- */
+  #main{flex:1;display:flex;min-height:0;}
+  #canvasWrap{flex:1;position:relative;background:var(--bg-canvas);overflow:hidden;}
+  canvas{display:block;width:100%;height:100%;cursor:default;touch-action:none;-webkit-user-select:none;user-select:none;}
+  #statusbar{
+    position:absolute;left:0;right:0;bottom:0;
+    background:var(--surface-translucent);border-top:1px solid var(--sidebar-border);
+    padding:5px 12px;font-size:11.5px;color:var(--text-dim);
+    display:flex;justify-content:space-between;font-family:var(--mono);
+    backdrop-filter:blur(2px);
+  }
+  #hint{color:var(--accent-dark);font-family:var(--sans);font-weight:600;}
+  #zoomCtl{position:absolute;right:14px;bottom:34px;display:flex;flex-direction:column;gap:4px;}
+  .zbtn{width:30px;height:30px;border-radius:7px;border:1px solid var(--sidebar-border);
+    background:var(--surface);cursor:pointer;font-size:16px;color:var(--text);box-shadow:0 1px 3px #0002;}
+  .zbtn:hover{background:var(--accent-soft);}
+
+  /* ---------- Sidebar ---------- */
+  #sidebar{
+    width:352px;flex-shrink:0;background:var(--sidebar-bg);border-left:1px solid var(--sidebar-border);
+    overflow-y:auto;font-size:12.5px;
+  }
+
+  /* ---------- Responsive: phone / narrow portrait -> sidebar becomes a bottom panel ---------- */
+  @media (max-width: 860px){
+    #main{ flex-direction:column; }
+    #canvasWrap{ flex:1 1 auto; min-height:140px; }
+    #sidebar{
+      width:100%; flex:0 0 auto; max-height:44vh; min-height:170px;
+      border-left:none; border-top:2px solid var(--sidebar-border);
+      -webkit-overflow-scrolling:touch;
+    }
+    .tb-btn span{display:none;}
+    .tb-btn{min-width:auto;padding:7px 8px;}
+    .tb-label{display:none;}
+    .tb-select{max-width:96px;}
+  }
+
+  .panel{border-bottom:8px solid var(--panel-gutter);padding:12px 14px;}
+  .panel h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);
+    display:flex;align-items:center;justify-content:space-between;}
+  .panel h3 .tag{font-size:9.5px;background:var(--accent-soft);color:var(--accent-dark);padding:2px 6px;border-radius:20px;text-transform:none;letter-spacing:0;}
+  .card{background:var(--surface-2);border:1px solid var(--surface-border-soft);border-radius:8px;padding:9px 10px;margin-bottom:8px;}
+  .row{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
+  .row:last-child{margin-bottom:0;}
+  .row label{flex:0 0 auto;color:var(--text-dim);font-size:11.5px;min-width:66px;}
+  .row input[type=number], .row input[type=text], .row select{
+    flex:1;min-width:0;padding:5px 6px;border:1px solid var(--input-border);border-radius:5px;font-size:12px;
+    font-family:var(--mono);background:var(--input-bg);color:var(--text);
+  }
+  select{font-family:var(--sans) !important;}
+  .row .unit{color:#8b98a7;font-size:10.5px;width:32px;flex:0 0 auto;}
+  .row-pair{display:flex;gap:8px;margin-bottom:6px;}
+  .row-pair .half{flex:1;min-width:0;}
+  .row-pair .half label{display:block;color:var(--text-dim);font-size:10.5px;margin-bottom:2px;}
+  .row-pair .half .inp-unit{display:flex;align-items:center;gap:4px;}
+  .row-pair .half input{width:100%;min-width:0;padding:5px 6px;border:1px solid var(--input-border);border-radius:5px;
+    font-size:12px;font-family:var(--mono);background:var(--input-bg);color:var(--text);}
+  .row-pair .half .unit{color:#8b98a7;font-size:10px;flex:0 0 auto;}
+  .nudgebtn{padding:4px 8px !important;font-size:10.5px !important;}
+  .btnrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}
+  button.mini{
+    background:var(--surface);border:1px solid var(--input-border);border-radius:6px;padding:5px 9px;font-size:11px;cursor:pointer;color:var(--text);
+  }
+  button.mini:hover{background:var(--accent-soft);border-color:var(--accent);}
+  button.mini.on{background:var(--accent);border-color:var(--accent-dark);color:#fff;}
+  button.mini.danger{color:var(--danger);}
+  button.mini.danger:hover{background:#fee2e2;border-color:var(--danger);}
+  button.primary-btn{background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px 12px;
+    font-size:12.5px;font-weight:600;cursor:pointer;width:100%;}
+  button.primary-btn:hover{background:var(--accent-dark);}
+  .checkline{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12px;color:var(--text);}
+  .checkline input{width:15px;height:15px;}
+  .muted{color:var(--text-dim);font-size:11px;}
+  .empty-state{color:var(--text-dim);font-size:12px;text-align:center;padding:18px 6px;}
+  table.rtab{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;}
+  table.rtab th{text-align:right;font-family:var(--sans);color:var(--text-dim);font-weight:500;font-size:10.5px;padding:3px 4px;border-bottom:1px solid var(--surface-border-soft);}
+  table.rtab td{text-align:right;padding:3px 4px;border-bottom:1px solid var(--surface-border-soft);}
+  table.rtab th:first-child, table.rtab td:first-child{text-align:left;}
+  .swatch{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px;}
+  .diagToggle{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border:1px solid var(--surface-border-soft);border-radius:7px;margin-bottom:5px;background:var(--surface);}
+  .diagToggle.active{background:var(--surface-2);}
+  .diagToggle .lbl{display:flex;align-items:center;font-size:12px;}
+  input[type=range]{width:100%;accent-color:var(--accent);}
+  .listitem{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border:1px solid var(--surface-border-soft);
+    border-radius:7px;margin-bottom:5px;font-size:11.5px;cursor:pointer;background:var(--surface);}
+  .listitem:hover{border-color:var(--accent);}
+  .listitem.sel{background:var(--accent-soft);border-color:var(--accent);}
+  .listitem .del{color:#b3bcc6;cursor:pointer;padding:2px 5px;border-radius:4px;font-size:13px;}
+  .listitem .del:hover{color:var(--danger);background:#fee2e2;}
+  .probeval{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;font-family:var(--mono);font-size:12px;background:#0f172a;
+    color:#e2e8f0;border-radius:8px;padding:10px;margin-top:8px;}
+  .probeval div span.k{color:#94a3b8;font-family:var(--sans);display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;}
+  .probeval div span.v{font-size:13px;}
+  .warn{background:#fff7ed;border:1px solid #fdba74;color:#9a3412;padding:8px 10px;border-radius:7px;font-size:11.5px;margin-bottom:8px;}
+  .collapsible-head{cursor:pointer;user-select:none;}
+  .subtle-icon{opacity:.6;}
+  hr.sep{border:none;border-top:1px solid var(--surface-border-soft);margin:10px 0;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="toolbar"><!-- filled by JS render for maintainability of icons --></div>
+  <div id="main">
+    <div id="canvasWrap">
+      <canvas id="cv"></canvas>
+      <div id="zoomCtl">
+        <button class="zbtn" id="zoomIn" title="Powiększ">+</button>
+        <button class="zbtn" id="zoomOut" title="Pomniejsz">−</button>
+        <button class="zbtn" id="zoomFit" title="Dopasuj widok">⤢</button>
+      </div>
+      <div id="statusbar">
+        <span id="hint">Tryb: Zaznacz</span>
+        <span id="coords">x=0.00 m, y=0.00 m</span>
+      </div>
+    </div>
+    <div id="sidebar"></div>
+  </div>
+</div>
+<script>
+'use strict';
+/* =========================================================================
+   FEM CORE — 2D bar/frame structures (Euler-Bernoulli), validated engine.
+   Internal units: kN, m, kNm, kN/m, kN/m^2, degrees C, radians.
+   DOF order per node: [u (axial), v (transverse), theta (rotation, ccw+)]
+   ========================================================================= */
+(function(){
+// ---------- small linear algebra helpers ----------
+function zerosMat(r,c){return Array.from({length:r},()=>new Array(c).fill(0));}
+function zerosVec(n){return new Array(n).fill(0);}
+function matMul(A,B){const r=A.length,k=B.length,c=B[0].length;const out=zerosMat(r,c);
+  for(let i=0;i<r;i++)for(let j=0;j<c;j++){let s=0;for(let m=0;m<k;m++)s+=A[i][m]*B[m][j];out[i][j]=s;}return out;}
+function matVec(A,v){const r=A.length,c=A[0].length;const out=zerosVec(r);
+  for(let i=0;i<r;i++){let s=0;for(let j=0;j<c;j++)s+=A[i][j]*v[j];out[i]=s;}return out;}
+function transpose(A){const r=A.length,c=A[0].length;const out=zerosMat(c,r);
+  for(let i=0;i<r;i++)for(let j=0;j<c;j++)out[j][i]=A[i][j];return out;}
+function invSmall(A){
+  const n=A.length;
+  const M=A.map((row,i)=>row.concat(Array.from({length:n},(_,j)=>i===j?1:0)));
+  for(let col=0;col<n;col++){
+    let piv=col;
+    for(let r=col+1;r<n;r++) if(Math.abs(M[r][col])>Math.abs(M[piv][col])) piv=r;
+    const tmp=M[col];M[col]=M[piv];M[piv]=tmp;
+    const pv=M[col][col]||1e-12;
+    for(let j=0;j<2*n;j++) M[col][j]/=pv;
+    for(let r=0;r<n;r++){ if(r===col) continue; const f=M[r][col];
+      for(let j=0;j<2*n;j++) M[r][j]-=f*M[col][j]; }
+  }
+  return M.map(row=>row.slice(n));
+}
+function solveLinSys(Ain,bin){
+  const n=Ain.length; const A=Ain.map(r=>r.slice()); const b=bin.slice();
+  let singular=false;
+  for(let col=0;col<n;col++){
+    let piv=col;
+    for(let r=col+1;r<n;r++) if(Math.abs(A[r][col])>Math.abs(A[piv][col])) piv=r;
+    if(Math.abs(A[piv][col])<1e-9){ singular=true; continue; }
+    const tmpA=A[col];A[col]=A[piv];A[piv]=tmpA;
+    const tmpb=b[col];b[col]=b[piv];b[piv]=tmpb;
+    const pv=A[col][col];
+    for(let j=col;j<n;j++) A[col][j]/=pv;
+    b[col]/=pv;
+    for(let r=0;r<n;r++){
+      if(r===col) continue;
+      const f=A[r][col]; if(f===0) continue;
+      for(let j=col;j<n;j++) A[r][j]-=f*A[col][j];
+      b[r]-=f*b[col];
+    }
+  }
+  return {x:b, singular};
+}
+
+const GAUSS5={pts:[-0.9061798459386640,-0.5384693101056831,0,0.5384693101056831,0.9061798459386640],
+  wts:[0.2369268850561891,0.4786286704993665,0.5688888888888889,0.4786286704993665,0.2369268850561891]};
+function integrate(f,a,b){
+  const mid=(a+b)/2, half=(b-a)/2; let sum=0;
+  for(let i=0;i<GAUSS5.pts.length;i++) sum+=GAUSS5.wts[i]*f(mid+half*GAUSS5.pts[i]);
+  return sum*half;
+}
+
+function localStiffness(E,A,I,L){
+  const k=zerosMat(6,6); const EAL=E*A/L, EI=E*I;
+  k[0][0]=EAL;  k[0][3]=-EAL;
+  k[3][0]=-EAL; k[3][3]=EAL;
+  k[1][1]=12*EI/L**3;  k[1][2]=6*EI/L**2;  k[1][4]=-12*EI/L**3; k[1][5]=6*EI/L**2;
+  k[2][1]=6*EI/L**2;   k[2][2]=4*EI/L;     k[2][4]=-6*EI/L**2;  k[2][5]=2*EI/L;
+  k[4][1]=-12*EI/L**3; k[4][2]=-6*EI/L**2; k[4][4]=12*EI/L**3;  k[4][5]=-6*EI/L**2;
+  k[5][1]=6*EI/L**2;   k[5][2]=2*EI/L;     k[5][4]=-6*EI/L**2;  k[5][5]=4*EI/L;
+  return k;
+}
+function shapeN_axial(x,L){return [1-x/L, x/L];}
+function shapeH_bend(x,L){
+  const xi=x/L;
+  return [1-3*xi*xi+2*xi**3, L*(xi-2*xi*xi+xi**3), 3*xi*xi-2*xi**3, L*(-xi*xi+xi**3)];
+}
+function localLoadFns(qStart,qEnd,alphaDeg,c,s,L){
+  const alpha=alphaDeg*Math.PI/180, qxDir=Math.cos(alpha), qyDir=Math.sin(alpha);
+  function mag(x){return qStart+(qEnd-qStart)*x/L;}
+  function n(x){const m=mag(x); const qx=m*qxDir, qy=m*qyDir; return c*qx+s*qy;}
+  function w(x){const m=mag(x); const qx=m*qxDir, qy=m*qyDir; return -s*qx+c*qy;}
+  return {n,w};
+}
+function distributedLoadLocalVector(qStart,qEnd,alphaDeg,c,s,L){
+  const {n,w}=localLoadFns(qStart,qEnd,alphaDeg,c,s,L);
+  const f=zerosVec(6);
+  f[0]=integrate(x=>{const [N1]=shapeN_axial(x,L);return n(x)*N1;},0,L);
+  f[3]=integrate(x=>{const [,N2]=shapeN_axial(x,L);return n(x)*N2;},0,L);
+  f[1]=integrate(x=>{const [H1]=shapeH_bend(x,L);return w(x)*H1;},0,L);
+  f[2]=integrate(x=>{const [,H2]=shapeH_bend(x,L);return w(x)*H2;},0,L);
+  f[4]=integrate(x=>{const [,,H3]=shapeH_bend(x,L);return w(x)*H3;},0,L);
+  f[5]=integrate(x=>{const [,,,H4]=shapeH_bend(x,L);return w(x)*H4;},0,L);
+  return f;
+}
+function thermalLocalVector(E,A,I,alpha,cTop,cBot,dTtop,dTbottom){
+  // Linear temperature field between the two extreme fibres (dTtop at +cTop,
+  // dTbottom at -cBot, measured from the centroid). The curvature only depends
+  // on the total height (fibre-independent), but the strain AT THE CENTROID
+  // must be weighted by how far the centroid actually sits from each fibre —
+  // this reduces to the old (dTtop+dTbottom)/2 exactly when cTop=cBot=h/2.
+  const h=(cTop+cBot)||1;
+  const eps0=alpha*(dTbottom+(dTtop-dTbottom)*cBot/h);
+  const kappa0=alpha*(dTbottom-dTtop)/h;
+  const f=zerosVec(6);
+  const EAe=E*A*eps0, EIk=E*I*kappa0;
+  f[0]=-EAe; f[3]=EAe; f[2]=-EIk; f[5]=EIk;
+  return f;
+}
+function condense(k,f,condIdx){
+  if(condIdx.length===0) return {k:k.map(r=>r.slice()), f:f.slice()};
+  const all=[0,1,2,3,4,5]; const R=all.filter(i=>!condIdx.includes(i)); const C=condIdx;
+  const Krr=R.map(i=>R.map(j=>k[i][j])), Krc=R.map(i=>C.map(j=>k[i][j]));
+  const Kcr=C.map(i=>R.map(j=>k[i][j])), Kcc=C.map(i=>C.map(j=>k[i][j]));
+  const Fr=R.map(i=>f[i]), Fc=C.map(i=>f[i]);
+  const KccInv=invSmall(Kcc);
+  const KccInvKcr=matMul(KccInv,Kcr);
+  const KrcKccInvKcr=matMul(Krc,KccInvKcr);
+  const Kred=Krr.map((row,i)=>row.map((val,j)=>val-KrcKccInvKcr[i][j]));
+  const KccInvFc=matVec(KccInv,Fc);
+  const KrcKccInvFc=matVec(Krc,KccInvFc);
+  const Fred=Fr.map((val,i)=>val-KrcKccInvFc[i]);
+  const kOut=zerosMat(6,6), fOut=zerosVec(6);
+  for(let i=0;i<R.length;i++){ fOut[R[i]]=Fred[i]; for(let j=0;j<R.length;j++) kOut[R[i]][R[j]]=Kred[i][j]; }
+  return {k:kOut, f:fOut};
+}
+function backSubstitute(kFull,fFull,dLocalRaw,condIdx){
+  if(condIdx.length===0) return dLocalRaw.slice();
+  const all=[0,1,2,3,4,5]; const R=all.filter(i=>!condIdx.includes(i)); const C=condIdx;
+  const Kcr=C.map(i=>R.map(j=>kFull[i][j])), Kcc=C.map(i=>C.map(j=>kFull[i][j]));
+  const Fc=C.map(i=>fFull[i]); const uR=R.map(i=>dLocalRaw[i]);
+  const KccInv=invSmall(Kcc);
+  const KcrUr=matVec(Kcr,uR);
+  const rhs=Fc.map((val,i)=>val-KcrUr[i]);
+  const uC=matVec(KccInv,rhs);
+  const dOut=dLocalRaw.slice();
+  for(let i=0;i<C.length;i++) dOut[C[i]]=uC[i];
+  return dOut;
+}
+
+function solveModel(model){
+  const nodes=model.nodes;
+  const nodeIndex={};
+  nodes.forEach((n,i)=>nodeIndex[n.id]=i);
+  const nDof=3*nodes.length;
+  let K=zerosMat(nDof,nDof), F=zerosVec(nDof);
+
+  const elemData=model.elements.map(el=>{
+    const n1=nodes[nodeIndex[el.n1]], n2=nodes[nodeIndex[el.n2]];
+    const dx=n2.x-n1.x, dy=n2.y-n1.y;
+    const L=Math.sqrt(dx*dx+dy*dy)||1e-6;
+    const c=dx/L, s=dy/L;
+    const kFull=localStiffness(el.E,el.A,el.I,L);
+    let fFull=zerosVec(6);
+    if(el.qStart!=null){
+      const fq=distributedLoadLocalVector(el.qStart,el.qEnd,el.qAngle,c,s,L);
+      fFull=fFull.map((v,i)=>v+fq[i]);
+    }
+    if(el.selfWeightQ){
+      const fsw=distributedLoadLocalVector(el.selfWeightQ,el.selfWeightQ,270,c,s,L);
+      fFull=fFull.map((v,i)=>v+fsw[i]);
+    }
+    if(el.dTtop!=null){
+      const cTopFb=(el.cTop!=null)?el.cTop:(el.h||0)/2;
+      const cBotFb=(el.cBot!=null)?el.cBot:(el.h||0)/2;
+      const ft=thermalLocalVector(el.E,el.A,el.I,el.alpha,cTopFb,cBotFb,el.dTtop,el.dTbottom);
+      fFull=fFull.map((v,i)=>v+ft[i]);
+    }
+    // a concentrated moment applied directly at a hinge, on THIS member's own
+    // (free-rotating) side of it — added straight into the local rotational DOF
+    // before condensation, so it enters the hinge's equilibrium exactly like an
+    // externally applied moment on that free end would.
+    if(el.hingeStart && el.momentHingeStart){ fFull[2]+=el.momentHingeStart; }
+    if(el.hingeEnd && el.momentHingeEnd){ fFull[5]+=el.momentHingeEnd; }
+    const condIdx=[];
+    if(el.hingeStart) condIdx.push(2);
+    if(el.hingeEnd) condIdx.push(5);
+    const {k:kCond,f:fCond}=condense(kFull,fFull,condIdx);
+    const T=[[c,s,0,0,0,0],[-s,c,0,0,0,0],[0,0,1,0,0,0],[0,0,0,c,s,0],[0,0,0,-s,c,0],[0,0,0,0,0,1]];
+    const Tt=transpose(T);
+    const kGlobal=matMul(matMul(Tt,kCond),T);
+    const fGlobal=matVec(Tt,fCond);
+    const dofMap=[3*nodeIndex[el.n1]+0,3*nodeIndex[el.n1]+1,3*nodeIndex[el.n1]+2,
+                  3*nodeIndex[el.n2]+0,3*nodeIndex[el.n2]+1,3*nodeIndex[el.n2]+2];
+    return {el,n1,n2,L,c,s,kFull,fFull,condIdx,kCond,fCond,kGlobal,fGlobal,dofMap};
+  });
+
+  for(const ed of elemData){
+    for(let i=0;i<6;i++){
+      F[ed.dofMap[i]]+=ed.fGlobal[i];
+      for(let j=0;j<6;j++) K[ed.dofMap[i]][ed.dofMap[j]]+=ed.kGlobal[i][j];
+    }
+  }
+  (model.nodalLoads||[]).forEach(nl=>{
+    const idx=nodeIndex[nl.nodeId];
+    if(nl.Fx) F[3*idx+0]+=nl.Fx;
+    if(nl.Fy) F[3*idx+1]+=nl.Fy;
+    if(nl.M) F[3*idx+2]+=nl.M;
+  });
+
+  const Lambda=zerosMat(nDof,nDof);
+  for(let i=0;i<nDof;i++) Lambda[i][i]=1;
+  const supportMap={};
+  (model.supports||[]).forEach(sp=>{supportMap[sp.nodeId]=sp;});
+  nodes.forEach((n,i)=>{
+    const sp=supportMap[n.id];
+    if(sp && sp.angleDeg){
+      const a=sp.angleDeg*Math.PI/180, c=Math.cos(a), s=Math.sin(a);
+      const iu=3*i, iv=3*i+1;
+      Lambda[iu][iu]=c; Lambda[iu][iv]=-s; Lambda[iv][iu]=s; Lambda[iv][iv]=c;
+    }
+  });
+  const LambdaT=transpose(Lambda);
+  let Kp=matMul(matMul(LambdaT,K),Lambda);
+  let Fp=matVec(LambdaT,F);
+
+  const isFixed=new Array(nDof).fill(false);
+  const fixedValue=new Array(nDof).fill(0);
+  const springInfo={};
+  nodes.forEach((n,i)=>{
+    const sp=supportMap[n.id]; if(!sp) return;
+    const dirs=[{c:sp.ux,dof:3*i+0},{c:sp.uy,dof:3*i+1},{c:sp.rz,dof:3*i+2}];
+    dirs.forEach(({c,dof})=>{
+      if(!c||c.type==='free') return;
+      if(c.type==='fixed'){ isFixed[dof]=true; fixedValue[dof]=c.delta||0; }
+      else if(c.type==='spring'){ Kp[dof][dof]+=c.k; Fp[dof]+=c.k*(c.delta||0); springInfo[dof]={k:c.k,delta:c.delta||0}; }
+    });
+  });
+
+  const freeIdx=[], fixedIdx=[];
+  // auto-lock DOFs with (numerically) zero stiffness that the user did not restrain.
+  // This happens e.g. when every element framing into a node has a hinge there,
+  // leaving that node's rotation physically disconnected from the rest of the
+  // structure (no meaning of its own — each member's own rotation is recovered
+  // separately via condensation) — without this it would falsely look singular.
+  let maxDiag=0;
+  for(let i=0;i<nDof;i++) maxDiag=Math.max(maxDiag, Math.abs(Kp[i][i]));
+  const floatTol = Math.max(maxDiag,1)*1e-9;
+  for(let i=0;i<nDof;i++){
+    if(!isFixed[i] && Math.abs(Kp[i][i])<floatTol){ isFixed[i]=true; fixedValue[i]=0; }
+  }
+  for(let i=0;i<nDof;i++){ if(isFixed[i]) fixedIdx.push(i); else freeIdx.push(i); }
+  const Kff=freeIdx.map(i=>freeIdx.map(j=>Kp[i][j]));
+  const Kfc=freeIdx.map(i=>fixedIdx.map(j=>Kp[i][j]));
+  const Uc=fixedIdx.map(i=>fixedValue[i]);
+  const Ff=freeIdx.map(i=>Fp[i]);
+  const rhs=Ff.map((val,i)=>val-matVec([Kfc[i]],Uc)[0]);
+  let singular=false;
+  const solved = freeIdx.length>0 ? solveLinSys(Kff,rhs) : {x:[],singular:false};
+  const Uf=solved.x; singular=solved.singular;
+
+  const Dp=zerosVec(nDof);
+  freeIdx.forEach((gi,i)=>{Dp[gi]=Uf[i];});
+  fixedIdx.forEach((gi,i)=>{Dp[gi]=Uc[i];});
+
+  const Rp=matVec(Kp,Dp).map((v,i)=>v-Fp[i]);
+  Object.keys(springInfo).forEach(dofStr=>{
+    const dof=+dofStr; const {k,delta}=springInfo[dof];
+    Rp[dof]=k*(delta-Dp[dof]);
+  });
+
+  const D=matVec(Lambda,Dp);
+  const Rglobal=matVec(Lambda,Rp);
+
+  const results=elemData.map(ed=>{
+    const dg=ed.dofMap.map(i=>D[i]);
+    const T=[[ed.c,ed.s,0,0,0,0],[-ed.s,ed.c,0,0,0,0],[0,0,1,0,0,0],
+             [0,0,0,ed.c,ed.s,0],[0,0,0,-ed.s,ed.c,0],[0,0,0,0,0,1]];
+    const dLocalRaw=matVec(T,dg);
+    const dLocal=backSubstitute(ed.kFull,ed.fFull,dLocalRaw,ed.condIdx);
+    const Fend=matVec(ed.kFull,dLocal).map((v,i)=>v-ed.fFull[i]);
+    return {el:ed.el,L:ed.L,c:ed.c,s:ed.s,dLocal,Fend};
+  });
+
+  return {D,Rglobal,results,elemData,nodeIndex,singular};
+}
+
+function pointResults(edRes,x){
+  const {el,L,dLocal,Fend}=edRes;
+  const qStart=(el.qStart!=null)?el.qStart:0, qEnd=(el.qEnd!=null)?el.qEnd:0, qAngle=(el.qAngle!=null)?el.qAngle:0;
+  const {n,w}=localLoadFns(qStart,qEnd,qAngle,edRes.c,edRes.s,L);
+  let n0=n(0),nL=n(L),w0=w(0),wL=w(L);
+  if(el.selfWeightQ){
+    const {n:nsw,w:wsw}=localLoadFns(el.selfWeightQ,el.selfWeightQ,270,edRes.c,edRes.s,L);
+    n0+=nsw(0); nL+=nsw(L); w0+=wsw(0); wL+=wsw(L);
+  }
+  const N0=-Fend[0], V0=Fend[1];
+  const E=el.E,A=el.A,I=el.I;
+  // cTop/cBot = distance from the section's centroid to its top/bottom extreme
+  // fibre. Falls back to a symmetric h/2 split for any model (e.g. an older
+  // exported JSON) that predates this field.
+  const cTop=(el.cTop!=null)?el.cTop:(el.h||0)/2;
+  const cBot=(el.cBot!=null)?el.cBot:(el.h||0)/2;
+  const alpha=el.alpha||0, dTtop=el.dTtop||0, dTbottom=el.dTbottom||0;
+  const h=(cTop+cBot)||1;
+  const eps0=alpha*(dTbottom+(dTtop-dTbottom)*cBot/h);
+  const kappa0=alpha*(dTbottom-dTtop)/h;
+  let M0=-Fend[2];
+  // Fend at a condensed (hinged) DOF is tautologically zero by construction of the
+  // condensation/back-substitution — it can't reflect the true M(0) when x=0 itself
+  // is the hinge (e.g. a moment applied right at that hinge creates a jump there).
+  // Fix: when hingeStart is active, solve for M0 from the OTHER (independently known)
+  // boundary condition instead — the rotation at the far end, dLocal[5], which is
+  // always correctly known whether that end is rigid, free, or itself condensed.
+  if(el.hingeStart){
+    const th0x=dLocal[2], thL=dLocal[5];
+    const otherTerms = V0*L*L/2 + w0*L**3/6 + (wL-w0)*L**3/24;
+    M0 = (E*I*(thL - th0x - kappa0*L) - otherTerms) / L;
+  }
+  const IntN=(xx)=>n0*xx+(nL-n0)*xx*xx/(2*L);
+  const IntW=(xx)=>w0*xx+(wL-w0)*xx*xx/(2*L);
+  const N=N0-IntN(x);
+  const V=V0+IntW(x);
+  const M=M0+V0*x+w0*x*x/2+(wL-w0)*x**3/(6*L);
+  const u0=dLocal[0], v0=dLocal[1], th0=dLocal[2];
+  const intN0x=N0*x-(n0*x*x/2+(nL-n0)*x**3/(6*L));
+  const u=u0+intN0x/(E*A)+eps0*x;
+  const intM=M0*x+V0*x*x/2+w0*x**3/6+(wL-w0)*x**4/(24*L);
+  const theta=th0+intM/(E*I)+kappa0*x;
+  const intIntM=M0*x*x/2+V0*x**3/6+w0*x**4/24+(wL-w0)*x**5/(120*L);
+  const v=v0+th0*x+intIntM/(E*I)+kappa0*x*x/2;
+  const c=edRes.c, s=edRes.s;
+  const Ux=c*u-s*v, Uy=s*u+c*v;
+  const Astress = (el.A_real!=null) ? el.A_real : el.A;
+  const sigTop=(Astress? N/Astress:0)-(el.I? M*cTop/el.I:0);
+  const sigBot=(Astress? N/Astress:0)+(el.I? M*cBot/el.I:0);
+  return {x,N,V,M,u_local:u,v_local:v,theta,Ux_global:Ux,Uy_global:Uy,sigTop,sigBot};
+}
+
+window.FEM = { solveModel, pointResults };
+})();
+
+/* =========================================================================
+   APPLICATION STATE
+   ========================================================================= */
+const UNIT = { GPa:1e6, cm2:1e-4, cm4:1e-8, cm:1e-2, alphaU:1e-5, deg:Math.PI/180 };
+const FONT_SANS = "'Segoe UI', system-ui, -apple-system, sans-serif";
+const FONT_MONO = "'SF Mono','Cascadia Code','Consolas','Roboto Mono',monospace";
+
+let materials = [
+  {id:1, name:'Stal konstrukcyjna', E:210, alpha:1.2, density:7850},
+  {id:2, name:'Beton C25/30', E:30, alpha:1.0, density:2400},
+  {id:3, name:'Aluminium', E:70, alpha:2.3, density:2700},
+  {id:4, name:'Drewno C24', E:11, alpha:0.5, density:450},
+];
+let sections = [
+  {id:1, name:'Prostokąt 20×40 cm', shape:'rect', b:20, hh:40, A:20*40, I:20*Math.pow(40,3)/12, h:40, cTop:20, cBot:20},
+  {id:2, name:'Okrągły Ø30 cm', shape:'circ', d:30, A:Math.PI*30*30/4, I:Math.PI*Math.pow(30,4)/64, h:30, cTop:15, cBot:15},
+];
+let nextMatId=5, nextSecId=3;
+
+/* ---- shape catalogs (dimensions in cm, source: statyka.info — dydaktyczne, patrz
+   zastrzeżenie na źródłowej stronie; do zastosowań rzeczywistych zweryfikuj wg PN-EN) ----
+   h,b = wysokość/szerokość całkowita; A = pole; Ix = moment bezwładności względem
+   osi zginania (pozioma, "x-x" w tablicach); Wx1/Wx2 (tylko teowniki) = wskaźniki
+   wytrzymałości do dwóch RÓŻNYCH włókien skrajnych — stąd e1=Ix/Wx1 (bliżej stopki)
+   i e2=Ix/Wx2 (bliżej końca środnika) dają asymetryczne położenie środka ciężkości.
+   zs (tylko kątowniki) = odległość środka ciężkości od naroża (grzbietu ramion) —
+   analogicznie daje asymetryczne cTop/cBot. s/tf/tw/t = grubości (tylko do podglądu
+   graficznego, nie wchodzą do obliczeń). */
+const CATALOG_TEE = [
+  {name:'T30',  h:3.0,  b:3.0,  s:0.40, A:2.26,  Ix:1.72,  Wx1:2.01,  Wx2:0.80},
+  {name:'T35',  h:3.5,  b:3.5,  s:0.45, A:2.97,  Ix:3.10,  Wx1:3.12,  Wx2:1.23},
+  {name:'T40',  h:4.0,  b:4.0,  s:0.50, A:3.77,  Ix:5.28,  Wx1:4.58,  Wx2:1.84},
+  {name:'T50',  h:5.0,  b:5.0,  s:0.60, A:5.66,  Ix:12.1,  Wx1:8.65,  Wx2:3.36},
+  {name:'T60',  h:6.0,  b:6.0,  s:0.70, A:7.94,  Ix:23.8,  Wx1:14.66, Wx2:5.48},
+  {name:'T70',  h:7.0,  b:7.0,  s:0.80, A:10.6,  Ix:44.5,  Wx1:22.98, Wx2:8.79},
+  {name:'T80',  h:8.0,  b:8.0,  s:0.90, A:13.6,  Ix:73.7,  Wx1:33.96, Wx2:12.8},
+  {name:'T100', h:10.0, b:10.0, s:1.10, A:20.85, Ix:178.2, Wx1:65.13, Wx2:24.56},
+  {name:'T120', h:12.0, b:12.0, s:1.30, A:29.6,  Ix:365.4, Wx1:111.5, Wx2:41.89},
+  {name:'T140', h:14.0, b:14.0, s:1.50, A:39.85, Ix:668.4, Wx1:175.3, Wx2:65.6},
+];
+const CATALOG_IPN = [
+  {name:'IPN 80',  h:8.0,  b:4.2,  tw:0.39, tf:0.59, A:7.57,  Ix:77.8},
+  {name:'IPN 100', h:10.0, b:5.0,  tw:0.45, tf:0.68, A:10.6,  Ix:171},
+  {name:'IPN 120', h:12.0, b:5.8,  tw:0.51, tf:0.77, A:14.2,  Ix:328},
+  {name:'IPN 140', h:14.0, b:6.6,  tw:0.57, tf:0.86, A:18.2,  Ix:573},
+  {name:'IPN 160', h:16.0, b:7.4,  tw:0.63, tf:0.95, A:22.8,  Ix:935},
+  {name:'IPN 180', h:18.0, b:8.2,  tw:0.69, tf:1.04, A:27.9,  Ix:1450},
+  {name:'IPN 200', h:20.0, b:9.0,  tw:0.75, tf:1.13, A:33.4,  Ix:2140},
+  {name:'IPN 220', h:22.0, b:9.8,  tw:0.81, tf:1.22, A:39.5,  Ix:3060},
+  {name:'IPN 240', h:24.0, b:10.6, tw:0.87, tf:1.31, A:46.1,  Ix:4250},
+  {name:'IPN 260', h:26.0, b:11.3, tw:0.94, tf:1.41, A:53.3,  Ix:5740},
+  {name:'IPN 280', h:28.0, b:11.9, tw:1.01, tf:1.52, A:61.0,  Ix:7590},
+  {name:'IPN 300', h:30.0, b:12.5, tw:1.08, tf:1.62, A:69.0,  Ix:9800},
+  {name:'IPN 320', h:32.0, b:13.1, tw:1.15, tf:1.73, A:77.7,  Ix:12510},
+  {name:'IPN 340', h:34.0, b:13.7, tw:1.22, tf:1.83, A:86.7,  Ix:15700},
+  {name:'IPN 360', h:36.0, b:14.3, tw:1.30, tf:1.95, A:97.0,  Ix:19610},
+  {name:'IPN 380', h:38.0, b:14.9, tw:1.37, tf:2.05, A:107,   Ix:24010},
+  {name:'IPN 400', h:40.0, b:15.5, tw:1.44, tf:2.16, A:118,   Ix:29210},
+  {name:'IPN 450', h:45.0, b:17.0, tw:1.62, tf:2.43, A:147,   Ix:45850},
+  {name:'IPN 500', h:50.0, b:18.5, tw:1.80, tf:2.70, A:179,   Ix:68740},
+  {name:'IPN 550', h:55.0, b:20.0, tw:1.90, tf:3.00, A:212,   Ix:99180},
+  {name:'IPN 600', h:60.0, b:21.5, tw:2.16, tf:3.24, A:254,   Ix:139000},
+];
+const CATALOG_IPE = [
+  {name:'IPE 80', h:8, b:4.6, tw:0.38, tf:0.52, A:7.64, Ix:80.14},
+  {name:'IPE 100', h:10, b:5.5, tw:0.41, tf:0.57, A:10.3, Ix:171},
+  {name:'IPE 120', h:12, b:6.4, tw:0.44, tf:0.63, A:13.2, Ix:317.8},
+  {name:'IPE 140', h:14, b:7.3, tw:0.47, tf:0.69, A:16.4, Ix:541.2},
+  {name:'IPE 160', h:16, b:8.2, tw:0.5, tf:0.74, A:20.1, Ix:869.3},
+  {name:'IPE 180', h:18, b:9.1, tw:0.53, tf:0.8, A:23.9, Ix:1317},
+  {name:'IPE 200', h:20, b:10, tw:0.56, tf:0.85, A:28.5, Ix:1943},
+  {name:'IPE 220', h:22, b:11, tw:0.59, tf:0.92, A:33.4, Ix:2772},
+  {name:'IPE 240', h:24, b:12, tw:0.62, tf:0.98, A:39.1, Ix:3892},
+  {name:'IPE 300', h:30, b:15, tw:0.71, tf:1.07, A:53.8, Ix:8356},
+  {name:'IPE 330', h:33, b:16, tw:0.75, tf:1.15, A:62.6, Ix:11770},
+  {name:'IPE 360', h:36, b:17, tw:0.8, tf:1.27, A:72.7, Ix:16270},
+  {name:'IPE 400', h:40, b:18, tw:0.86, tf:1.35, A:84.5, Ix:23130},
+  {name:'IPE 450', h:45, b:19, tw:0.94, tf:1.46, A:98.8, Ix:33740},
+  {name:'IPE 500', h:50, b:20, tw:1.02, tf:1.6, A:116, Ix:48200},
+  {name:'IPE 550', h:55, b:21, tw:1.11, tf:1.72, A:134, Ix:67120},
+  {name:'IPE 600', h:60, b:22, tw:1.2, tf:1.9, A:156, Ix:92080},
+];
+const CATALOG_HEA = [
+  {name:'HEA 100', h:9.6, b:10, tw:0.5, tf:0.8, A:21.2, Ix:349.2},
+  {name:'HEA 120', h:11.4, b:12, tw:0.5, tf:0.8, A:25.3, Ix:606.2},
+  {name:'HEA 140', h:13.3, b:14, tw:0.55, tf:0.85, A:31.4, Ix:1033},
+  {name:'HEA 160', h:15.2, b:16, tw:0.6, tf:0.9, A:38.8, Ix:1673},
+  {name:'HEA 180', h:17.1, b:18, tw:0.6, tf:0.95, A:45.3, Ix:2510},
+  {name:'HEA 200', h:19, b:20, tw:0.65, tf:1, A:53.8, Ix:3692},
+  {name:'HEA 220', h:21, b:22, tw:0.7, tf:1.1, A:64.3, Ix:5410},
+  {name:'HEA 240', h:23, b:24, tw:0.75, tf:1.2, A:76.8, Ix:7763},
+  {name:'HEA 260', h:25, b:26, tw:0.75, tf:1.25, A:86.8, Ix:10450},
+  {name:'HEA 280', h:27, b:28, tw:0.8, tf:1.3, A:97.3, Ix:13670},
+  {name:'HEA 300', h:29, b:30, tw:0.85, tf:1.4, A:112.5, Ix:18260},
+  {name:'HEA 320', h:31, b:30, tw:0.9, tf:1.55, A:124.4, Ix:22930},
+  {name:'HEA 340', h:33, b:30, tw:0.95, tf:1.65, A:133.5, Ix:27690},
+  {name:'HEA 360', h:35, b:30, tw:1, tf:1.75, A:142.8, Ix:33090},
+  {name:'HEA 400', h:39, b:30, tw:1.1, tf:1.9, A:159, Ix:45070},
+  {name:'HEA 450', h:44, b:30, tw:1.15, tf:2.1, A:178, Ix:63720},
+  {name:'HEA 500', h:49, b:30, tw:1.2, tf:2.3, A:197.5, Ix:86970},
+  {name:'HEA 550', h:54, b:30, tw:1.25, tf:2.4, A:211.8, Ix:111900},
+  {name:'HEA 600', h:59, b:30, tw:1.3, tf:2.5, A:226.5, Ix:141200},
+  {name:'HEA 650', h:64, b:30, tw:1.35, tf:2.6, A:241.6, Ix:175200},
+  {name:'HEA 700', h:69, b:30, tw:1.45, tf:2.7, A:260.5, Ix:215300},
+  {name:'HEA 800', h:79, b:30, tw:1.5, tf:2.8, A:285.8, Ix:303400},
+  {name:'HEA 900', h:89, b:30, tw:1.6, tf:3, A:320.5, Ix:422100},
+  {name:'HEA 1000', h:99, b:30, tw:1.65, tf:3.1, A:346.8, Ix:553800},
+];
+const CATALOG_HEB = [
+  {name:'HEB 100', h:10, b:10, tw:0.6, tf:1, A:26, Ix:449.5},
+  {name:'HEB 120', h:12, b:12, tw:0.65, tf:1.1, A:34, Ix:864.4},
+  {name:'HEB 140', h:14, b:14, tw:0.7, tf:1.2, A:43, Ix:1509},
+  {name:'HEB 160', h:16, b:16, tw:0.8, tf:1.3, A:54.3, Ix:2492},
+  {name:'HEB 180', h:18, b:18, tw:0.85, tf:1.4, A:65.3, Ix:3831},
+  {name:'HEB 200', h:20, b:20, tw:0.9, tf:1.5, A:78.1, Ix:5696},
+  {name:'HEB 220', h:22, b:22, tw:0.95, tf:1.6, A:91, Ix:8091},
+  {name:'HEB 240', h:24, b:24, tw:1, tf:1.7, A:106, Ix:11260},
+  {name:'HEB 260', h:26, b:26, tw:1, tf:1.75, A:118.4, Ix:14920},
+  {name:'HEB 280', h:28, b:28, tw:1.05, tf:1.8, A:131.4, Ix:19270},
+  {name:'HEB 300', h:30, b:30, tw:1.1, tf:1.9, A:149.1, Ix:25170},
+  {name:'HEB 320', h:32, b:30, tw:1.15, tf:2.05, A:161.3, Ix:30820},
+  {name:'HEB 340', h:34, b:30, tw:1.2, tf:2.15, A:170.9, Ix:36660},
+  {name:'HEB 360', h:36, b:30, tw:1.25, tf:2.25, A:180.6, Ix:43190},
+  {name:'HEB 400', h:40, b:30, tw:1.35, tf:2.4, A:197.8, Ix:57680},
+  {name:'HEB 450', h:45, b:30, tw:1.4, tf:2.6, A:218, Ix:79890},
+  {name:'HEB 500', h:50, b:30, tw:1.45, tf:2.8, A:238.6, Ix:107200},
+  {name:'HEB 550', h:55, b:30, tw:1.5, tf:2.9, A:254.1, Ix:136700},
+  {name:'HEB 600', h:60, b:30, tw:1.55, tf:3, A:270, Ix:171000},
+  {name:'HEB 650', h:65, b:30, tw:1.6, tf:3.1, A:286.3, Ix:210600},
+  {name:'HEB 700', h:70, b:30, tw:1.7, tf:3.2, A:306.4, Ix:256900},
+  {name:'HEB 800', h:80, b:30, tw:1.75, tf:3.3, A:334.2, Ix:359100},
+  {name:'HEB 900', h:90, b:30, tw:1.85, tf:3.5, A:371.3, Ix:494100},
+  {name:'HEB 1000', h:100, b:30, tw:1.9, tf:3.6, A:400, Ix:644700},
+];
+const CATALOG_UPN = [
+  {name:'UPN 50', h:5, b:3.8, tw:0.5, tf:0.7, A:7.12, Ix:26.4},
+  {name:'UPN 65', h:6.5, b:4.2, tw:0.55, tf:0.75, A:9.03, Ix:57.5},
+  {name:'UPN 80', h:8, b:4.5, tw:0.6, tf:0.8, A:11, Ix:106},
+  {name:'UPN 100', h:10, b:5, tw:0.6, tf:0.85, A:13.5, Ix:206},
+  {name:'UPN 120', h:12, b:5.5, tw:0.7, tf:0.9, A:17, Ix:364},
+  {name:'UPN 140', h:14, b:6, tw:0.7, tf:1, A:20.4, Ix:605},
+  {name:'UPN 160', h:16, b:6.5, tw:0.75, tf:1.05, A:24, Ix:925},
+  {name:'UPN 180', h:18, b:7, tw:0.8, tf:1.1, A:28, Ix:1350},
+  {name:'UPN 200', h:20, b:7.5, tw:0.85, tf:1.15, A:32.2, Ix:1910},
+  {name:'UPN 220', h:22, b:8, tw:0.9, tf:1.25, A:37.4, Ix:2690},
+  {name:'UPN 240', h:24, b:8.5, tw:0.95, tf:1.3, A:42.3, Ix:3600},
+  {name:'UPN 260', h:26, b:9, tw:1, tf:1.4, A:48.3, Ix:4820},
+  {name:'UPN 280', h:28, b:9.5, tw:1, tf:1.5, A:53.3, Ix:6280},
+  {name:'UPN 300', h:30, b:10, tw:1, tf:1.6, A:58.8, Ix:8030},
+  {name:'UPN 320', h:32, b:10, tw:1.4, tf:1.75, A:75.8, Ix:10870},
+  {name:'UPN 350', h:35, b:10, tw:1.4, tf:1.6, A:77.3, Ix:12840},
+  {name:'UPN 380', h:38, b:10.2, tw:1.35, tf:1.6, A:80.4, Ix:15760},
+  {name:'UPN 400', h:40, b:11, tw:1.4, tf:1.8, A:91.5, Ix:20350},
+];
+const CATALOG_UPE = [
+  {name:'UPE 80', h:8, b:5, tw:0.4, tf:0.7, A:10.1, Ix:107.2},
+  {name:'UPE 100', h:10, b:5.5, tw:0.45, tf:0.75, A:12.5, Ix:206.86},
+  {name:'UPE 120', h:12, b:6, tw:0.5, tf:0.8, A:15.4, Ix:363.5},
+  {name:'UPE 140', h:14, b:6.5, tw:0.5, tf:0.9, A:18.4, Ix:600},
+  {name:'UPE 160', h:16, b:7, tw:0.55, tf:0.95, A:21.7, Ix:911.06},
+  {name:'UPE 180', h:18, b:7.5, tw:0.55, tf:1.05, A:25.1, Ix:1350},
+  {name:'UPE 200', h:20, b:8, tw:0.6, tf:1.1, A:29, Ix:1910},
+  {name:'UPE 220', h:22, b:8.5, tw:0.65, tf:1.2, A:33.9, Ix:2680},
+  {name:'UPE 240', h:24, b:9, tw:0.7, tf:1.25, A:38.5, Ix:3600},
+  {name:'UPE 270', h:27, b:9.5, tw:0.75, tf:1.35, A:44.8, Ix:5250},
+  {name:'UPE 300', h:30, b:10, tw:0.95, tf:1.5, A:56.6, Ix:7820},
+  {name:'UPE 330', h:33, b:10.5, tw:1.1, tf:1.6, A:67.8, Ix:11010},
+  {name:'UPE 360', h:36, b:11, tw:1.2, tf:1.7, A:77.9, Ix:14830},
+  {name:'UPE 400', h:40, b:11.5, tw:1.35, tf:1.8, A:91.9, Ix:20980},
+];
+const CATALOG_L = [
+  {name:'L 20×20×3', h:2, t:0.3, A:1.12, Ix:0.38, zs:0.59},
+  {name:'L 25×25×3', h:2.5, t:0.3, A:1.42, Ix:0.79, zs:0.72},
+  {name:'L 30×30×3', h:3, t:0.3, A:1.74, Ix:1.4, zs:0.83},
+  {name:'L 35×35×4', h:3.5, t:0.4, A:2.67, Ix:2.95, zs:1},
+  {name:'L 40×40×4', h:4, t:0.4, A:3.08, Ix:4.47, zs:1.11},
+  {name:'L 45×45×4', h:4.5, t:0.4, A:3.49, Ix:6.43, zs:1.23},
+  {name:'L 50×50×5', h:5, t:0.5, A:4.8, Ix:10.96, zs:1.4},
+  {name:'L 55×55×5', h:5.5, t:0.5, A:5.31, Ix:14.71, zs:1.51},
+  {name:'L 60×60×5', h:6, t:0.5, A:5.81, Ix:19.37, zs:1.64},
+  {name:'L 65×65×6', h:6.5, t:0.6, A:7.52, Ix:29.18, zs:1.8},
+  {name:'L 70×70×6', h:7, t:0.6, A:8.12, Ix:36.88, zs:1.93},
+  {name:'L 75×75×6', h:7.5, t:0.6, A:8.72, Ix:45.82, zs:2.05},
+  {name:'L 80×80×6', h:8, t:0.6, A:9.34, Ix:55.82, zs:2.17},
+  {name:'L 90×90×7', h:9, t:0.7, A:12.23, Ix:92.5, zs:2.45},
+  {name:'L 100×100×8', h:10, t:0.8, A:15.51, Ix:144.84, zs:2.73},
+  {name:'L 110×110×10', h:11, t:1, A:21.18, Ix:237.97, zs:3.06},
+  {name:'L 120×120×10', h:12, t:1, A:23.18, Ix:312.93, zs:3.31},
+  {name:'L 130×130×12', h:13, t:1.2, A:29.97, Ix:472.17, zs:3.64},
+  {name:'L 150×150×12', h:15, t:1.2, A:34.83, Ix:736.91, zs:4.12},
+  {name:'L 160×160×15', h:16, t:1.5, A:46.06, Ix:1098.83, zs:4.49},
+  {name:'L 180×180×15', h:18, t:1.5, A:52.09, Ix:1588.55, zs:4.98},
+  {name:'L 200×200×18', h:20, t:1.8, A:69.1, Ix:2599.74, zs:5.6},
+  {name:'L 250×250×25', h:25, t:2.5, A:119.09, Ix:6985.79, zs:7.18},
+];
+/* ---- registry: kind = jak liczyć geometrię/asymetrię, draw = jak rysować podgląd ---- */
+const CATALOG_DEFS = {
+  IPN:{label:'IPN — dwuteownik wąski', data:CATALOG_IPN, kind:'sym', draw:'ibeam'},
+  IPE:{label:'IPE — dwuteownik (stopki równoległe)', data:CATALOG_IPE, kind:'sym', draw:'ibeam'},
+  HEA:{label:'HEA — dwuteownik szerokostopowy lekki', data:CATALOG_HEA, kind:'sym', draw:'ibeam'},
+  HEB:{label:'HEB — dwuteownik szerokostopowy', data:CATALOG_HEB, kind:'sym', draw:'ibeam'},
+  UPN:{label:'UPN — ceownik zwykły', data:CATALOG_UPN, kind:'sym', draw:'channel'},
+  UPE:{label:'UPE — ceownik (stopki równoległe)', data:CATALOG_UPE, kind:'sym', draw:'channel'},
+  T:{label:'T — teownik', data:CATALOG_TEE, kind:'tee', draw:'tee'},
+  L:{label:'L — kątownik równoramienny', data:CATALOG_L, kind:'angle', draw:'angle'},
+};
+const CATALOG_ORDER=['IPN','IPE','HEA','HEB','UPN','UPE','T','L'];
+
+let nodes=[];     // {id,x,y, force:{F,angle}|null, moment:{M}|null, support:{angleDeg,ux,uy,rz}|null}
+let elements=[];  // {id,n1,n2,sectionId,materialId,hingeStart,hingeEnd,q:{qStart,qEnd,angle}|null,thermal:{dTtop,dTbottom}|null}
+let nextNodeId=1, nextElemId=1;
+let defaultSectionId=1, defaultMaterialId=1;
+
+let mode='select';           // select | addNode | addBar | delete
+let selection={type:null,id:null};
+let barStart=null;
+let dragNode=null;           // id of node being dragged
+let panState=null;           // {startX,startY,startOffX,startOffY}
+let mouseModel={x:0,y:0};
+let hoverNodeId=null, hoverElemId=null;
+let snapEnabled=true, snapSize=0.5;
+let allowNewNodesInBarMode=true;
+
+/* ---- undo/redo history (model-only snapshots, taken automatically — see checkAndPushHistory) ---- */
+let undoStack=[], redoStack=[], lastSnapshot=null;
+const MAX_HISTORY=100;
+
+let solved=null;             // raw solver output
+let diagrams=null;           // per-element sampled arrays for plotting
+let solveWarning=null;
+let showDeform=false, showM=false, showT=false, showN=false, showStress=false, showReactions=false;
+// remembers the user's last chosen result-view toggles across re-solves (invalidateResults
+// resets the live show* flags every edit, but we want "Oblicz" to restore whatever the
+// person had been looking at, not always snap back to the bare deformation view).
+let lastResultView={showDeform:true, showM:false, showT:false, showN:false, showStress:false, showReactions:true};
+
+/* ---- program options (persist across model edits & undo/redo, NOT part of the structural model) ---- */
+let currentTheme='light';
+let includeAxialDeformation=true;
+let includeSelfWeight=false;
+let hideLoadsSupportsInResults=false;
+let showBackgroundGrid=true;
+let showIdLabels=false;
+const AXIAL_RIGID_FACTOR=1e5; // used to emulate "no axial deformation" without touching the FEM core
+let deformMult=1, diagMult=1;  // user multipliers on auto scale
+let autoDeform=1, autoDiagM=1, autoDiagT=1, autoDiagN=1, autoDiagS=1;
+// magnitudes from the current solve, used to derive a *relative* near-zero tolerance for
+// labels/arrows (floating-point residuals scale with the problem, e.g. the "exclude axial
+// deformation" option inflates stiffness ~1e5x and can push noise well past a fixed 1e-8).
+let magM=0, magT=0, magN=0, magS=0, magReaction=0;
+function isNegligible(v, mag){ return Math.abs(v) < Math.max(1e-8, mag*1e-6); }
+let probe={elId:null, t:0.5};
+
+const view = {scale:60, offX:0, offY:0};
+let userAdjustedView=false;
+let canvas, ctx, DPR=1;
+
+function uid(arr){ return arr.length? Math.max(...arr.map(o=>o.id))+1 : 1; }
+function getNode(id){ return nodes.find(n=>n.id===id); }
+function getElement(id){ return elements.find(e=>e.id===id); }
+function getMaterial(id){ return materials.find(m=>m.id===id); }
+function getSection(id){ return sections.find(s=>s.id===id); }
+function elLength(el){ const a=getNode(el.n1), b=getNode(el.n2); return Math.hypot(b.x-a.x,b.y-a.y); }
+function fmt(v,d=3){ if(v==null||isNaN(v)) return '—'; if(Math.abs(v)<1e-9) v=0; return v.toFixed(d); }
+function fmtSmart(v){ if(v==null||isNaN(v)) return '—'; const a=Math.abs(v); if(a===0) return '0';
+  if(a<0.001) return v.toExponential(2); if(a<10) return v.toFixed(3); if(a<1000) return v.toFixed(2); return v.toFixed(1); }
+
+function setStatusHint(text){ document.getElementById('hint').textContent = text; }
+
+function normalizeAngle(a){ a = a%360; if(a>180) a-=360; if(a<=-180) a+=360; return Math.round(a*100)/100; }
+
+function copyToClipboard(text,label){
+  const done=(ok)=>setStatusHint((ok?'Skopiowano':'Nie udało się skopiować — wartość')+': '+text+(label?(' ('+label+')'):''));
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=>done(true)).catch(()=>fallbackCopy(text,done));
+  } else {
+    fallbackCopy(text,done);
+  }
+}
+function fallbackCopy(text,done){
+  try{
+    const ta=document.createElement('textarea');
+    ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; ta.style.top='0'; ta.style.left='0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    const ok=document.execCommand('copy');
+    document.body.removeChild(ta);
+    done(ok);
+  }catch(e){ done(false); }
+}
+
+/* compact "two inputs side by side" row used for value pairs (X/Y, qStart/qEnd, dTtop/dTbottom, F/kąt...) */
+function pairRow(l1,val1,step1,unit1,onchange1,l2,val2,step2,unit2,onchange2){
+  return `<div class="row-pair">
+    <div class="half"><label>${l1}</label><div class="inp-unit"><input type="number" step="${step1}" value="${val1}" onchange="${onchange1}"><span class="unit">${unit1}</span></div></div>
+    <div class="half"><label>${l2}</label><div class="inp-unit"><input type="number" step="${step2}" value="${val2}" onchange="${onchange2}"><span class="unit">${unit2}</span></div></div>
+  </div>`;
+}
+function angleNudgeButtons(fnName,id){
+  return `<button class="mini nudgebtn" onclick="${fnName}(${id},45)">+45°</button><button class="mini nudgebtn" onclick="${fnName}(${id},-45)">−45°</button>`;
+}
+
+function invalidateResults(){
+  solved=null; diagrams=null; solveWarning=null;
+  showDeform=showM=showT=showN=showStress=showReactions=false;
+  probe.elId=null;
+}
+
+/* =========================================================================
+   MODEL BUILDING + SOLVE
+   ========================================================================= */
+function buildSolverModel(){
+  const nodesArr = nodes.map(n=>({id:n.id,x:n.x,y:n.y}));
+  const elementsArr = elements.map(el=>{
+    const mat=getMaterial(el.materialId), sec=getSection(el.sectionId);
+    const E=mat.E*UNIT.GPa, A_real=sec.A*UNIT.cm2, I=sec.I*UNIT.cm4, alpha=mat.alpha*UNIT.alphaU;
+    // cTop/cBot = distance (centroid -> extreme fibre) for asymmetric sections
+    // (e.g. catalog tees). Falls back to a symmetric h/2 split for sections
+    // that only ever defined h (older library entries / imported JSON).
+    const cTopCm = (sec.cTop!=null) ? sec.cTop : (sec.h||0)/2;
+    const cBotCm = (sec.cBot!=null) ? sec.cBot : (sec.h||0)/2;
+    const cTop=cTopCm*UNIT.cm, cBot=cBotCm*UNIT.cm;
+    const h=(cTopCm+cBotCm)*UNIT.cm; // kept for anything still reading el.h
+    const A = includeAxialDeformation ? A_real : A_real*AXIAL_RIGID_FACTOR;
+    const obj={id:el.id,n1:el.n1,n2:el.n2,E,A,A_real,I,alpha,h,cTop,cBot,hingeStart:!!el.hingeStart,hingeEnd:!!el.hingeEnd};
+    if(el.q){
+      let qS=el.q.qStart, qE=el.q.qEnd, ang=el.q.angle;
+      if(el.q.mode==='vertical' || el.q.mode==='horizontal'){
+        const na=getNode(el.n1), nb=getNode(el.n2);
+        const dx=nb.x-na.x, dy=nb.y-na.y, Lb=Math.hypot(dx,dy)||1;
+        const factor = el.q.mode==='vertical' ? Math.abs(dx/Lb) : Math.abs(dy/Lb);
+        qS=qS*factor; qE=qE*factor;
+      }
+      obj.qStart=qS; obj.qEnd=qE; obj.qAngle=ang;
+    }
+    if(el.thermal){ obj.dTtop=el.thermal.dTtop; obj.dTbottom=el.thermal.dTbottom; }
+    if(includeSelfWeight){ obj.selfWeightQ = mat.density*9.81/1000*A_real; } // kg/m3 * m/s2 / 1000 * m2 = kN/m
+    if(el.hingeStart && el.momentHingeStart){ obj.momentHingeStart=el.momentHingeStart; }
+    if(el.hingeEnd && el.momentHingeEnd){ obj.momentHingeEnd=el.momentHingeEnd; }
+    return obj;
+  });
+  const supportsArr = nodes.filter(n=>n.support).map(n=>{
+    const sp=n.support;
+    function conv(dir,isRot){
+      if(!dir||dir.type==='free') return {type:'free'};
+      if(dir.type==='fixed') return {type:'fixed', delta:(dir.delta||0)*(isRot?UNIT.deg:UNIT.cm)};
+      return {type:'spring', k:dir.k||0, delta:(dir.delta||0)*(isRot?UNIT.deg:UNIT.cm)};
+    }
+    return {nodeId:n.id, angleDeg:sp.angleDeg||0, ux:conv(sp.ux,false), uy:conv(sp.uy,false), rz:conv(sp.rz,true)};
+  });
+  const nodalLoads=[];
+  nodes.forEach(n=>{
+    if(n.force){ const a=n.force.angle*UNIT.deg; nodalLoads.push({nodeId:n.id, Fx:n.force.F*Math.cos(a), Fy:n.force.F*Math.sin(a), M:0}); }
+    if(n.moment){ nodalLoads.push({nodeId:n.id, Fx:0, Fy:0, M:n.moment.M}); }
+  });
+  return {nodes:nodesArr, elements:elementsArr, supports:supportsArr, nodalLoads};
+}
+
+function modelBBox(){
+  if(nodes.length===0) return {minX:0,minY:0,maxX:10,maxY:10};
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  nodes.forEach(n=>{ minX=Math.min(minX,n.x); maxX=Math.max(maxX,n.x); minY=Math.min(minY,n.y); maxY=Math.max(maxY,n.y); });
+  if(minX===maxX){minX-=2;maxX+=2;} if(minY===maxY){minY-=2;maxY+=2;}
+  return {minX,minY,maxX,maxY};
+}
+
+function runAnalysis(){
+  if(nodes.length<2 || elements.length<1){
+    solveWarning='Dodaj co najmniej dwa węzły i jeden pręt, aby uruchomić obliczenia.';
+    solved=null; diagrams=null; renderSidebar(); render(); return;
+  }
+  const hasAnySupport = nodes.some(n=>n.support && (
+    (n.support.ux&&n.support.ux.type!=='free') || (n.support.uy&&n.support.uy.type!=='free') || (n.support.rz&&n.support.rz.type!=='free')));
+  if(!hasAnySupport){
+    solveWarning='Model nie ma zdefiniowanych podpór — układ jest niestabilny.';
+    solved=null; diagrams=null; renderSidebar(); render(); return;
+  }
+  const model = buildSolverModel();
+  let out;
+  try{ out = FEM.solveModel(model); }
+  catch(e){ solveWarning='Błąd obliczeń: '+e.message; solved=null; diagrams=null; renderSidebar(); render(); return; }
+  solved = out;
+  solveWarning = out.singular ? 'Układ może być geometrycznie niestabilny lub niedostatecznie podparty — wyniki mogą być błędne.' : null;
+
+  // sample diagrams
+  diagrams = {};
+  let maxDisp=0, maxM=0, maxT=0, maxN=0, maxS=0;
+  const NSAMP=40;
+  solved.results.forEach((edRes,idx)=>{
+    const elId = elements[idx].id;
+    const pts=[];
+    for(let i=0;i<=NSAMP;i++){
+      const x = edRes.L*i/NSAMP;
+      const pr = FEM.pointResults(edRes,x);
+      pts.push(pr);
+      maxDisp=Math.max(maxDisp, Math.hypot(pr.Ux_global,pr.Uy_global));
+      maxM=Math.max(maxM, Math.abs(pr.M));
+      maxT=Math.max(maxT, Math.abs(pr.V));
+      maxN=Math.max(maxN, Math.abs(pr.N));
+      maxS=Math.max(maxS, Math.abs(pr.sigTop), Math.abs(pr.sigBot));
+    }
+    diagrams[elId] = {pts, L:edRes.L, c:edRes.c, s:edRes.s, n1:getNode(elements[idx].n1)};
+  });
+  const bbox = modelBBox();
+  const diag = Math.hypot(bbox.maxX-bbox.minX, bbox.maxY-bbox.minY) || 10;
+  autoDeform = maxDisp>1e-9 ? (0.12*diag)/maxDisp : 1;
+  autoDiagM = maxM>1e-9 ? (0.14*diag)/maxM : 1;
+  autoDiagT = maxT>1e-9 ? (0.14*diag)/maxT : 1;
+  autoDiagN = maxN>1e-9 ? (0.14*diag)/maxN : 1;
+  autoDiagS = maxS>1e-9 ? (0.14*diag)/maxS : 1;
+  magM=maxM; magT=maxT; magN=maxN; magS=maxS;
+  magReaction = Math.max(...solved.Rglobal.map(v=>Math.abs(v)), 0);
+  deformMult=1; diagMult=1;
+  showDeform=lastResultView.showDeform;
+  showM=lastResultView.showM;
+  showT=lastResultView.showT;
+  showN=lastResultView.showN;
+  showStress=lastResultView.showStress;
+  showReactions=lastResultView.showReactions;
+  if(elements.length && probe.elId==null) probe.elId = elements[0].id;
+  renderSidebar();
+  render();
+}
+
+/* =========================================================================
+   GEOMETRY / VIEW TRANSFORM
+   ========================================================================= */
+function toScreen(x,y){ return {x: view.offX + x*view.scale, y: view.offY - y*view.scale}; }
+function toModel(px,py){ return {x: (px-view.offX)/view.scale, y: -(py-view.offY)/view.scale}; }
+
+function fitView(){
+  const rect = canvas.getBoundingClientRect();
+  const bbox = modelBBox();
+  const w = Math.max(bbox.maxX-bbox.minX, 0.001), h = Math.max(bbox.maxY-bbox.minY, 0.001);
+  const margin=70;
+  const sx = (rect.width-2*margin)/w, sy=(rect.height-2*margin)/h;
+  view.scale = Math.max(4, Math.min(sx,sy, 300));
+  const cx=(bbox.minX+bbox.maxX)/2, cy=(bbox.minY+bbox.maxY)/2;
+  view.offX = rect.width/2 - cx*view.scale;
+  view.offY = rect.height/2 + cy*view.scale;
+}
+
+function resizeCanvas(){
+  const rect = canvas.getBoundingClientRect();
+  if(rect.width<2 || rect.height<2) return; // layout not settled yet — a later pass will retry
+  DPR = window.devicePixelRatio||1;
+  canvas.width = Math.round(rect.width*DPR);
+  canvas.height = Math.round(rect.height*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  render();
+}
+
+/* =========================================================================
+   NODE / ELEMENT CRUD
+   ========================================================================= */
+function snap(v){ return snapEnabled ? Math.round(v/snapSize)*snapSize : Math.round(v*1000)/1000; }
+
+function createNode(x,y,skipSnap){
+  const id = nextNodeId++;
+  const px = skipSnap ? Math.round(x*1e6)/1e6 : snap(x);
+  const py = skipSnap ? Math.round(y*1e6)/1e6 : snap(y);
+  nodes.push({id, x:px, y:py, force:null, moment:null, support:null});
+  return id;
+}
+function createElement(n1,n2){
+  if(n1===n2) return null;
+  const a=getNode(n1), b=getNode(n2);
+  if(Math.hypot(b.x-a.x,b.y-a.y) < 1e-4) return null;
+  const exists = elements.some(e=>(e.n1===n1&&e.n2===n2)||(e.n1===n2&&e.n2===n1));
+  if(exists) return null;
+  const id = nextElemId++;
+  elements.push({id,n1,n2,sectionId:defaultSectionId,materialId:defaultMaterialId,
+    hingeStart:false,hingeEnd:false,q:null,thermal:null});
+  invalidateResults();
+  return id;
+}
+function deleteNode(id){
+  elements = elements.filter(e=>e.n1!==id && e.n2!==id);
+  nodes = nodes.filter(n=>n.id!==id);
+  if(selection.type==='node' && selection.id===id) selection={type:null,id:null};
+  invalidateResults();
+}
+function deleteElement(id){
+  elements = elements.filter(e=>e.id!==id);
+  if(selection.type==='element' && selection.id===id) selection={type:null,id:null};
+  invalidateResults();
+}
+
+/* =========================================================================
+   RENDERING
+   ========================================================================= */
+function niceGridStep(minModelSpacing){
+  const steps=[0.1,0.2,0.25,0.5,1,2,2.5,5,10,20,25,50,100,200,500];
+  for(const s of steps) if(s>=minModelSpacing) return s;
+  return 1000;
+}
+function elemBasePoint(n1,c,s,x){ return {x:n1.x+x*c, y:n1.y+x*s}; }
+
+function drawGrid(){
+  const rect=canvas.getBoundingClientRect();
+  const step = niceGridStep(55/view.scale);
+  const major = step*5;
+  const topLeft = toModel(0,0), botRight = toModel(rect.width,rect.height);
+  const x0=Math.floor(topLeft.x/step)*step, x1=Math.ceil(botRight.x/step)*step;
+  const y0=Math.floor(botRight.y/step)*step, y1=Math.ceil(topLeft.y/step)*step;
+  ctx.lineWidth=1;
+  for(let x=x0;x<=x1;x+=step){
+    const isMajor = Math.abs(Math.round(x/major)*major - x) < step/2;
+    ctx.strokeStyle = isMajor ? getCss('--grid-line-major') : getCss('--grid-line');
+    const p0=toScreen(x,topLeft.y), p1=toScreen(x,botRight.y);
+    ctx.beginPath(); ctx.moveTo(p0.x+.5,p0.y); ctx.lineTo(p1.x+.5,p1.y); ctx.stroke();
+  }
+  for(let y=y0;y<=y1;y+=step){
+    const isMajor = Math.abs(Math.round(y/major)*major - y) < step/2;
+    ctx.strokeStyle = isMajor ? getCss('--grid-line-major') : getCss('--grid-line');
+    const p0=toScreen(topLeft.x,y), p1=toScreen(botRight.x,y);
+    ctx.beginPath(); ctx.moveTo(p0.x,p0.y+.5); ctx.lineTo(p1.x,p1.y+.5); ctx.stroke();
+  }
+  // origin axes
+  ctx.strokeStyle=getCss('--axis-color'); ctx.lineWidth=1.4;
+  const o=toScreen(0,0);
+  ctx.beginPath(); ctx.moveTo(0,o.y); ctx.lineTo(rect.width,o.y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(o.x,0); ctx.lineTo(o.x,rect.height); ctx.stroke();
+}
+let _cssCache={};
+function getCss(varName){
+  if(_cssCache[varName]) return _cssCache[varName];
+  const v=getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  _cssCache[varName]=v; return v;
+}
+function clearCssCache(){ _cssCache={}; }
+
+function drawElements(){
+  elements.forEach(el=>{
+    const a=getNode(el.n1), b=getNode(el.n2);
+    const pa=toScreen(a.x,a.y), pb=toScreen(b.x,b.y);
+    const isSel = selection.type==='element'&&selection.id===el.id;
+    const isHov = hoverElemId===el.id;
+    ctx.lineWidth = isSel?4.5:(isHov?4:3);
+    ctx.strokeStyle = isSel? getCss('--accent-dark') : (isHov? getCss('--accent') : getCss('--ink'));
+    if(showDeform && diagrams) ctx.globalAlpha=0.35;
+    ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(pb.x,pb.y); ctx.stroke();
+    ctx.globalAlpha=1;
+    // hinge markers
+    const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1, ux=dx/L, uy=dy/L;
+    const off=14/view.scale;
+    if(el.hingeStart){ const p=elemBasePoint(a,ux,uy, off); drawHinge(toScreen(p.x,p.y)); }
+    if(el.hingeEnd){ const p=elemBasePoint(a,ux,uy, L-off); drawHinge(toScreen(p.x,p.y)); }
+    if(isSel){
+      // local "top"(+y) indicator
+      const midx=(a.x+b.x)/2, midy=(a.y+b.y)/2;
+      const nx=-uy, ny=ux;
+      const p0=toScreen(midx,midy), p1=toScreen(midx+nx*0.6, midy+ny*0.6);
+      ctx.save(); ctx.setLineDash([3,3]); ctx.strokeStyle='#94a3b8'; ctx.lineWidth=1.3;
+      ctx.beginPath(); ctx.moveTo(p0.x,p0.y); ctx.lineTo(p1.x,p1.y); ctx.stroke(); ctx.restore();
+      ctx.fillStyle=getCss('--ink-soft'); ctx.font='10px '+FONT_SANS; ctx.textAlign='center';
+      ctx.fillText('góra', p1.x, p1.y-4);
+    }
+  });
+}
+function drawHinge(p){
+  ctx.beginPath(); ctx.arc(p.x,p.y,4.5,0,7); ctx.fillStyle=getCss('--surface'); ctx.fill();
+  ctx.lineWidth=2; ctx.strokeStyle=getCss('--ink'); ctx.stroke();
+}
+
+function drawNodes(){
+  nodes.forEach(n=>{
+    const p=toScreen(n.x,n.y);
+    const isSel = selection.type==='node'&&selection.id===n.id;
+    const isHov = hoverNodeId===n.id;
+    const isBarStart = mode==='addBar' && barStart===n.id;
+    if(isBarStart){
+      ctx.beginPath(); ctx.arc(p.x,p.y,11,0,7);
+      ctx.strokeStyle=getCss('--react-color'); ctx.lineWidth=2.4; ctx.setLineDash([3,2]); ctx.stroke(); ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(p.x,p.y,7.5,0,7);
+      ctx.fillStyle=getCss('--react-color'); ctx.fill();
+      ctx.lineWidth=1.5; ctx.strokeStyle=getCss('--bg-canvas'); ctx.stroke();
+      return;
+    }
+    ctx.beginPath(); ctx.arc(p.x,p.y, isSel?7:(isHov?6.5:5.5),0,7);
+    ctx.fillStyle = isSel? getCss('--accent-dark') : (isHov? getCss('--accent') : getCss('--ink'));
+    ctx.fill();
+    ctx.lineWidth=1.5; ctx.strokeStyle=getCss('--bg-canvas'); ctx.stroke();
+  });
+}
+
+function rot(x,y,ang){ const c=Math.cos(ang), s=Math.sin(ang); return {x:x*c-y*s, y:x*s+y*c}; }
+
+function drawSupports(){
+  nodes.forEach(n=>{
+    if(!n.support) return;
+    const sp=n.support;
+    const p=toScreen(n.x,n.y);
+    const angRad = -(sp.angleDeg||0)*Math.PI/180; // canvas rotate convention (see notes)
+    ctx.save();
+    ctx.translate(p.x,p.y);
+    ctx.rotate(angRad);
+    ctx.lineWidth=1.6; ctx.strokeStyle=getCss('--ink'); ctx.fillStyle=getCss('--surface-2');
+    const ux=dirType(sp.ux), uy=dirType(sp.uy), rz=dirType(sp.rz);
+    const S=13; // symbol size px
+    if(ux==='fixed' && uy==='fixed' && rz==='fixed'){
+      // full fixation -> wall hatch
+      ctx.beginPath(); ctx.moveTo(-S,0); ctx.lineTo(S,0); ctx.stroke();
+      for(let i=-S;i<=S;i+=5){ ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i-5,10); ctx.stroke(); }
+    } else if(ux!=='free' && uy!=='free' && rz==='free'){
+      // pin (triangle)
+      drawTriangleDown(S);
+      ctx.beginPath(); ctx.moveTo(-S,S+3); ctx.lineTo(S,S+3); ctx.stroke();
+      hatch(-S,S+3,S,S+3);
+    } else if(uy!=='free' && ux==='free' && rz==='free'){
+      // horizontal roller (restrains vertical)
+      drawTriangleDown(S);
+      ctx.beginPath(); ctx.arc(-S+4,S+7,3,0,7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0,S+7,3,0,7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(S-4,S+7,3,0,7); ctx.stroke();
+    } else if(ux!=='free' && uy==='free' && rz==='free'){
+      // vertical roller (restrains horizontal) - rotate triangle 90deg extra
+      ctx.save(); ctx.rotate(Math.PI/2);
+      drawTriangleDown(S);
+      ctx.beginPath(); ctx.arc(-S+4,S+7,3,0,7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0,S+7,3,0,7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(S-4,S+7,3,0,7); ctx.stroke();
+      ctx.restore();
+    } else {
+      // generic custom combination
+      drawGenericSupport(sp,S);
+    }
+    // spring indicators overlay
+    if(ux==='spring') drawSpringTick(-S-6,0,false);
+    if(uy==='spring') drawSpringTick(0,S+3,true);
+    if(rz==='spring'){ ctx.beginPath(); ctx.arc(0,0,S*0.55,0.3,5.9); ctx.strokeStyle='#7c3aed'; ctx.lineWidth=1.6; ctx.stroke(); }
+    ctx.restore();
+  });
+}
+function dirType(d){ return d? d.type : 'free'; }
+function drawTriangleDown(S){
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-S,S); ctx.lineTo(S,S); ctx.closePath();
+  ctx.fillStyle='#e2e8f0'; ctx.fill(); ctx.stroke();
+}
+function hatch(x0,y0,x1,y1){
+  for(let t=0;t<=1;t+=0.18){ const x=x0+(x1-x0)*t; ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x-4,y0+7); ctx.stroke(); }
+}
+function drawSpringTick(x,y,vertical){
+  ctx.save(); ctx.translate(x,y); ctx.strokeStyle='#7c3aed'; ctx.lineWidth=1.6;
+  ctx.beginPath();
+  if(vertical){ ctx.moveTo(0,0); for(let i=0;i<5;i++){ ctx.lineTo((i%2?4:-4), 4+i*4); } }
+  else { ctx.moveTo(0,0); for(let i=0;i<5;i++){ ctx.lineTo(-4-i*4,(i%2?4:-4)); } }
+  ctx.stroke(); ctx.restore();
+}
+function drawGenericSupport(sp,S){
+  ctx.beginPath(); ctx.rect(-6,-6,12,12); ctx.fillStyle='#e2e8f0'; ctx.fill(); ctx.stroke();
+  ctx.font='8px '+FONT_MONO; ctx.fillStyle=getCss('--ink'); ctx.textAlign='center';
+  const labels=[];
+  if(dirType(sp.ux)!=='free') labels.push('H');
+  if(dirType(sp.uy)!=='free') labels.push('V');
+  if(dirType(sp.rz)!=='free') labels.push('M');
+  ctx.fillText(labels.join(''), 0, 22);
+}
+
+/* ---- loads ---- */
+function drawArrow(fromX,fromY,toX,toY,color){
+  ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=2.2;
+  ctx.beginPath(); ctx.moveTo(fromX,fromY); ctx.lineTo(toX,toY); ctx.stroke();
+  const ang=Math.atan2(toY-fromY,toX-fromX);
+  const ah=8;
+  ctx.beginPath();
+  ctx.moveTo(toX,toY);
+  ctx.lineTo(toX-ah*Math.cos(ang-0.4), toY-ah*Math.sin(ang-0.4));
+  ctx.lineTo(toX-ah*Math.cos(ang+0.4), toY-ah*Math.sin(ang+0.4));
+  ctx.closePath(); ctx.fill();
+}
+// draws a curved-arrow moment indicator; ccw for M>=0. Shared by applied nodal
+// moments and reaction moments (with a different radius so they don't collide).
+function drawMomentArc(cx,cy,M,r,color,label,offsetDeg){
+  offsetDeg = offsetDeg||0;
+  const ccw = M>=0;
+  const visStart = (10+offsetDeg)*Math.PI/180;
+  const sweep = (ccw?1:-1)*300*Math.PI/180;
+  const visEnd = visStart+sweep;
+  ctx.strokeStyle=color; ctx.lineWidth=2.2;
+  ctx.beginPath();
+  ctx.arc(cx,cy,r, -visStart, -visEnd, ccw);
+  ctx.stroke();
+  const ex=cx+r*Math.cos(visEnd), ey=cy-r*Math.sin(visEnd);
+  const tangentVis = visEnd + (ccw?1:-1)*Math.PI/2;
+  ctx.save(); ctx.translate(ex,ey); ctx.rotate(-tangentVis); ctx.fillStyle=color;
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-7,-4); ctx.lineTo(-7,4); ctx.closePath(); ctx.fill(); ctx.restore();
+  if(label){
+    // rotate the original (r+3,-r) label offset by offsetDeg (screen rotation = -offsetDeg,
+    // matching the visual-angle convention used throughout) — reduces to the exact
+    // original position when offsetDeg=0.
+    const offRad=-offsetDeg*Math.PI/180, bx=r+3, by=-r;
+    const rx=bx*Math.cos(offRad)-by*Math.sin(offRad), ry=bx*Math.sin(offRad)+by*Math.cos(offRad);
+    ctx.fillStyle=color; ctx.font='11px '+FONT_MONO; ctx.textAlign = rx<0?'right':'left';
+    ctx.fillText(label, cx+rx, cy+ry);
+  }
+}
+
+function drawLoads(){
+  const FCOLOR='#dc2626', MCOLOR='#d97706', QCOLOR='#0891b2', TCOLOR='#be185d';
+  nodes.forEach(n=>{
+    const p=toScreen(n.x,n.y);
+    if(n.force){
+      const a=n.force.angle*Math.PI/180;
+      const sign = (n.force.F||0)>=0 ? 1 : -1;
+      // arrow points TOWARD the node in the load direction (tip at node); negative
+      // magnitude flips the whole arrow to the opposite side, not just its label.
+      const dxs=sign*Math.cos(a), dys=-sign*Math.sin(a); // screen space (y flip)
+      const len=46;
+      drawArrow(p.x-dxs*len, p.y-dys*len, p.x-dxs*10, p.y-dys*10, FCOLOR);
+      ctx.fillStyle=FCOLOR; ctx.font='11px '+FONT_MONO; ctx.textAlign='left';
+      ctx.fillText(fmtSmart(n.force.F)+' kN', p.x-dxs*len+4, p.y-dys*len-4);
+    }
+    if(n.moment){
+      drawMomentArc(p.x,p.y,n.moment.M,22,MCOLOR,fmtSmart(n.moment.M)+' kNm');
+    }
+  });
+  elements.forEach(el=>{
+    if(!el.q) return;
+    const a=getNode(el.n1), b=getNode(el.n2);
+    const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1;
+    const ang=el.q.angle*Math.PI/180;
+    const ldx=Math.cos(ang), ldy=-Math.sin(ang); // screen-space direction for a POSITIVE q value
+    const n = Math.max(4, Math.min(14, Math.round(L*view.scale/38)));
+    const maxLen=42, minLen=14;
+    const qmax = Math.max(Math.abs(el.q.qStart), Math.abs(el.q.qEnd), 1e-9);
+    const qmode = el.q.mode||'resultant';
+    // For projected modes the arrowheads land on the bar's flat horizontal/vertical
+    // *projection* (touching the real bar at its highest/leftmost point), not on its
+    // actual sloped surface. Negative q flips the arrow to the OTHER side of that same
+    // landing point (not just a longer/shorter arrow in the same direction) — so a load
+    // that changes sign along its length draws as a clean bowtie pinching at zero,
+    // matching standard drafting convention, instead of a one-sided dip.
+    let landYFixed=null, landXFixed=null;
+    const bothNegative = el.q.qStart<0 && el.q.qEnd<0;
+    if(qmode==='vertical') landYFixed = toScreen(0, bothNegative? Math.min(a.y,b.y) : Math.max(a.y,b.y)).y;
+    else if(qmode==='horizontal') landXFixed = toScreen(bothNegative? Math.max(a.x,b.x) : Math.min(a.x,b.x), 0).x;
+    let tailPts=[], signDirs=[];
+    for(let i=0;i<=n;i++){
+      const t=i/n;
+      const qx=a.x+dx*t, qy=a.y+dy*t;
+      const qval = el.q.qStart+(el.q.qEnd-el.q.qStart)*t;
+      const sign = qval>=0 ? 1 : -1;
+      const len = minLen + (maxLen-minLen)*Math.abs(qval)/qmax;
+      const base=toScreen(qx,qy);
+      let land;
+      if(qmode==='vertical') land={x:base.x, y:landYFixed};
+      else if(qmode==='horizontal') land={x:landXFixed, y:base.y};
+      else land=base;
+      const dirx=sign*ldx, diry=sign*ldy;
+      const tail={x:land.x-dirx*len, y:land.y-diry*len};
+      drawArrow(tail.x,tail.y, land.x-dirx*4, land.y-diry*4, QCOLOR);
+      tailPts.push(tail); signDirs.push({x:dirx,y:diry});
+    }
+    ctx.strokeStyle=QCOLOR; ctx.lineWidth=1.3; ctx.setLineDash([3,2]);
+    ctx.beginPath(); tailPts.forEach((pt,i)=> i? ctx.lineTo(pt.x,pt.y): ctx.moveTo(pt.x,pt.y)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle=QCOLOR; ctx.font='10.5px '+FONT_MONO; ctx.textAlign='center';
+    ctx.fillText(fmtSmart(el.q.qStart), tailPts[0].x-signDirs[0].x*11, tailPts[0].y-signDirs[0].y*11);
+    ctx.fillText(fmtSmart(el.q.qEnd), tailPts[n].x-signDirs[n].x*11, tailPts[n].y-signDirs[n].y*11);
+  });
+  elements.forEach(el=>{
+    if(!el.thermal) return;
+    const a=getNode(el.n1), b=getNode(el.n2);
+    const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1, ux=dx/L, uy=dy/L;
+    const nx=-uy, ny=ux;
+    const midx=(a.x+b.x)/2, midy=(a.y+b.y)/2;
+    const off=0.35;
+    const pTop=toScreen(midx+nx*off, midy+ny*off);
+    const pBot=toScreen(midx-nx*off, midy-ny*off);
+    ctx.fillStyle=TCOLOR; ctx.font='10.5px '+FONT_MONO; ctx.textAlign='center';
+    ctx.fillText('Δt='+fmtSmart(el.thermal.dTtop)+'°C', pTop.x, pTop.y);
+    ctx.fillText('Δd='+fmtSmart(el.thermal.dTbottom)+'°C', pBot.x, pBot.y);
+  });
+}
+
+/* ---- deformation ---- */
+function drawDeformedShape(){
+  if(!diagrams) return;
+  const scale = autoDeform*deformMult;
+  ctx.strokeStyle = getCss('--def-color'); ctx.lineWidth=2.6; ctx.setLineDash([]);
+  elements.forEach(el=>{
+    const dg=diagrams[el.id]; if(!dg) return;
+    ctx.beginPath();
+    dg.pts.forEach((pr,i)=>{
+      const base=elemBasePoint(dg.n1,dg.c,dg.s,pr.x);
+      const gx=base.x+pr.Ux_global*scale, gy=base.y+pr.Uy_global*scale;
+      const p=toScreen(gx,gy);
+      if(i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y);
+    });
+    ctx.stroke();
+  });
+}
+
+/* ---- internal force / stress diagrams ---- */
+function diagramColor(type){
+  return {N:getCss('--n-color'), T:getCss('--t-color'), M:getCss('--m-color'), S:getCss('--s-color')}[type];
+}
+function drawDiagramType(type){
+  if(!diagrams) return;
+  const color = diagramColor(type);
+  const scale = type==='N'? autoDiagN*diagMult : type==='T'? autoDiagT*diagMult : type==='M'? autoDiagM*diagMult : autoDiagS*diagMult;
+  ctx.font='10px '+FONT_MONO;
+  elements.forEach(el=>{
+    const dg=diagrams[el.id]; if(!dg) return;
+    const nx=-dg.s, ny=dg.c; // local +y (model coords) - offset direction
+    let baseline=[], offsetLine=[];
+    dg.pts.forEach(pr=>{
+      const base=elemBasePoint(dg.n1,dg.c,dg.s,pr.x);
+      let val;
+      if(type==='N') val=pr.N; else if(type==='T') val=pr.V; else if(type==='M') val=-pr.M; else val=pr.sigTop;
+      const ox=base.x+nx*val*scale, oy=base.y+ny*val*scale;
+      baseline.push(toScreen(base.x,base.y));
+      offsetLine.push(toScreen(ox,oy));
+    });
+    // filled band
+    ctx.beginPath();
+    baseline.forEach((p,i)=> i? ctx.lineTo(p.x,p.y): ctx.moveTo(p.x,p.y));
+    for(let i=offsetLine.length-1;i>=0;i--) ctx.lineTo(offsetLine[i].x, offsetLine[i].y);
+    ctx.closePath();
+    ctx.fillStyle=color+'2e'; ctx.fill();
+    ctx.strokeStyle=color; ctx.lineWidth=1.6;
+    ctx.beginPath(); offsetLine.forEach((p,i)=> i? ctx.lineTo(p.x,p.y): ctx.moveTo(p.x,p.y)); ctx.stroke();
+    // stress: also draw bottom fiber as dashed
+    if(type==='S'){
+      let offsetLine2=[];
+      dg.pts.forEach(pr=>{
+        const base=elemBasePoint(dg.n1,dg.c,dg.s,pr.x);
+        const ox=base.x+nx*pr.sigBot*scale, oy=base.y+ny*pr.sigBot*scale;
+        offsetLine2.push(toScreen(ox,oy));
+      });
+      ctx.setLineDash([4,3]); ctx.beginPath();
+      offsetLine2.forEach((p,i)=> i? ctx.lineTo(p.x,p.y): ctx.moveTo(p.x,p.y)); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    // labels at ends (skipped when negligible relative to this diagram's own magnitude)
+    ctx.fillStyle=color; ctx.textAlign='center';
+    const v0 = type==='N'?dg.pts[0].N:type==='T'?dg.pts[0].V:type==='M'?dg.pts[0].M:dg.pts[0].sigTop;
+    const vE = type==='N'?dg.pts[dg.pts.length-1].N:type==='T'?dg.pts[dg.pts.length-1].V:type==='M'?dg.pts[dg.pts.length-1].M:dg.pts[dg.pts.length-1].sigTop;
+    const mag = type==='N'?magN:type==='T'?magT:type==='M'?magM:magS;
+    if(!isNegligible(v0,mag)) ctx.fillText(fmtSmart(v0), offsetLine[0].x, offsetLine[0].y + (offsetLine[0].y<baseline[0].y? -4:12));
+    if(!isNegligible(vE,mag)) ctx.fillText(fmtSmart(vE), offsetLine[offsetLine.length-1].x, offsetLine[offsetLine.length-1].y + (offsetLine[offsetLine.length-1].y<baseline[baseline.length-1].y? -4:12));
+  });
+}
+
+/* ---- probe marker ---- */
+function drawProbeMarker(){
+  if(!diagrams || probe.elId==null) return;
+  const dg=diagrams[probe.elId]; if(!dg) return;
+  const x = probe.t*dg.L;
+  const base = elemBasePoint(dg.n1,dg.c,dg.s,x);
+  const p=toScreen(base.x,base.y);
+  ctx.beginPath(); ctx.arc(p.x,p.y,6,0,7);
+  ctx.fillStyle='#0f172a'; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle='#fff'; ctx.stroke();
+  ctx.beginPath(); ctx.arc(p.x,p.y,10,0,7); ctx.strokeStyle='#0f172a55'; ctx.lineWidth=1.5; ctx.stroke();
+}
+
+/* ---- reactions on canvas ---- */
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+function drawReactions(){
+  if(!solved) return;
+  ctx.font='10.5px '+FONT_MONO;
+  const RC=getCss('--react-color');
+  const gap=26, len=32; // gap clears the support symbol; arrow tail sits gap+len away
+  nodes.forEach(n=>{
+    if(!n.support || solved.nodeIndex[n.id]==null) return;
+    const idx=solved.nodeIndex[n.id];
+    const Rx=solved.Rglobal[3*idx], Ry=solved.Rglobal[3*idx+1], Rm=solved.Rglobal[3*idx+2];
+    if(isNegligible(Rx,magReaction) && isNegligible(Ry,magReaction) && isNegligible(Rm,magReaction)) return;
+    const p=toScreen(n.x,n.y);
+    // rotate the global reaction into the support's own local frame (same convention
+    // the solver uses) so a rotated support with e.g. only one restrained direction
+    // shows exactly one arrow along that direction, with the free direction at 0 —
+    // not the raw, possibly-nonzero-looking global Rx/Ry components.
+    const angDeg=n.support.angleDeg||0, angRad=angDeg*Math.PI/180;
+    const c=Math.cos(angRad), s=Math.sin(angRad);
+    const Rlx = c*Rx + s*Ry;
+    const Rly = -s*Rx + c*Ry;
+    if(!isNegligible(Rlx,magReaction)){
+      const sign=Rlx>=0?1:-1;
+      const rdx=sign*c, rdy=-sign*s; // direction the reaction physically acts (screen space)
+      const px=-rdx, py=-rdy; // arrow sits on that side, pointing INTO the node
+      const head={x:p.x+px*gap, y:p.y+py*gap};
+      const tail={x:p.x+px*(gap+len), y:p.y+py*(gap+len)};
+      drawArrow(tail.x,tail.y,head.x,head.y,RC);
+      ctx.fillStyle=RC; ctx.textAlign = px<-0.2?'right':'left';
+      ctx.fillText(fmtSmart(Rlx)+' kN', tail.x+px*8, tail.y+py*8+3);
+    }
+    if(!isNegligible(Rly,magReaction)){
+      const sign=Rly>=0?1:-1;
+      const rdx=-sign*s, rdy=-sign*c; // direction the reaction physically acts (screen space)
+      const px=-rdx, py=-rdy;
+      const head={x:p.x+px*gap, y:p.y+py*gap};
+      const tail={x:p.x+px*(gap+len), y:p.y+py*(gap+len)};
+      drawArrow(tail.x,tail.y,head.x,head.y,RC);
+      ctx.fillStyle=RC; ctx.textAlign = px<-0.2?'right':'left';
+      ctx.fillText(fmtSmart(Rly)+' kN', tail.x+px*8, tail.y+py*8+3);
+    }
+    if(!isNegligible(Rm,magReaction)){
+      drawMomentArc(p.x,p.y,Rm,44,RC,fmtSmart(Rm)+' kNm', angDeg+45);
+    }
+  });
+}
+
+
+/* =========================================================================
+   MAIN RENDER
+   ========================================================================= */
+function render(){
+  if(!ctx) return;
+  const rect=canvas.getBoundingClientRect();
+  ctx.clearRect(0,0,rect.width,rect.height);
+  ctx.fillStyle=getCss('--bg-canvas'); ctx.fillRect(0,0,rect.width,rect.height);
+  if(showBackgroundGrid) drawGrid();
+  const showingResults = showDeform||showM||showT||showN||showStress||showReactions;
+  const hideLS = hideLoadsSupportsInResults && showingResults;
+  if(showDeform) drawDeformedShape();
+  drawElements();
+  if(showN) drawDiagramType('N');
+  if(showT) drawDiagramType('T');
+  if(showM) drawDiagramType('M');
+  if(showStress) drawDiagramType('S');
+  if(!hideLS) drawSupports();
+  if(!hideLS) drawLoads();
+  drawNodes();
+  if(showIdLabels) drawIdLabels();
+  if(showReactions) drawReactions();
+  if(probe.elId!=null && diagrams) drawProbeMarker();
+  drawScaleBar();
+}
+
+function drawIdLabels(){
+  ctx.font='10px '+FONT_MONO; ctx.textAlign='left';
+  elements.forEach(el=>{
+    const a=getNode(el.n1), b=getNode(el.n2);
+    const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+    const p=toScreen(mx,my);
+    ctx.fillStyle=getCss('--surface-translucent'); ctx.fillRect(p.x+3,p.y-13,20,13);
+    ctx.fillStyle=getCss('--accent-dark'); ctx.fillText('P'+el.id, p.x+4, p.y-3);
+  });
+  nodes.forEach(n=>{
+    const p=toScreen(n.x,n.y);
+    ctx.fillStyle=getCss('--surface-translucent'); ctx.fillRect(p.x+7,p.y-19,22,13);
+    ctx.fillStyle=getCss('--ink'); ctx.fillText('W'+n.id, p.x+8, p.y-9);
+  });
+}
+
+function niceScaleValue(maxPx,pxPerMeter){
+  const steps=[0.1,0.2,0.25,0.5,1,2,2.5,5,10,20,25,50,100,200,250,500,1000,2000,5000,10000];
+  let best=steps[0];
+  for(const s of steps){ if(s*pxPerMeter<=maxPx) best=s; else break; }
+  return best;
+}
+function drawScaleBar(){
+  const rect=canvas.getBoundingClientRect();
+  const maxPx=120;
+  const val=niceScaleValue(maxPx,view.scale);
+  const barPx=val*view.scale;
+  const marginLeft=16, y=rect.height-42;
+  const x0=marginLeft, x1=marginLeft+barPx;
+  const label=(val>=1? val : val)+' m';
+  ctx.font='10.5px '+FONT_MONO;
+  ctx.strokeStyle=getCss('--ink'); ctx.lineWidth=1.6;
+  ctx.beginPath();
+  ctx.moveTo(x0,y); ctx.lineTo(x1,y);
+  ctx.moveTo(x0,y-5); ctx.lineTo(x0,y+5);
+  ctx.moveTo(x1,y-5); ctx.lineTo(x1,y+5);
+  ctx.stroke();
+  ctx.fillStyle=getCss('--ink'); ctx.textAlign='left';
+  ctx.fillText(label, x0, y-8);
+}
+
+/* =========================================================================
+   HIT TESTING
+   ========================================================================= */
+function hitTestNode(px,py){
+  let best=null, bestD=12;
+  nodes.forEach(n=>{ const p=toScreen(n.x,n.y); const d=Math.hypot(p.x-px,p.y-py); if(d<bestD){bestD=d;best=n.id;} });
+  return best;
+}
+function hitTestElement(px,py){
+  let best=null, bestD=8;
+  elements.forEach(el=>{
+    const a=getNode(el.n1), b=getNode(el.n2);
+    const pa=toScreen(a.x,a.y), pb=toScreen(b.x,b.y);
+    const d=distToSeg(px,py,pa.x,pa.y,pb.x,pb.y);
+    if(d<bestD){ bestD=d; best=el.id; }
+  });
+  return best;
+}
+function distToSeg(px,py,x1,y1,x2,y2){
+  const dx=x2-x1, dy=y2-y1;
+  const len2=dx*dx+dy*dy;
+  let t = len2>0 ? ((px-x1)*dx+(py-y1)*dy)/len2 : 0;
+  t=Math.max(0,Math.min(1,t));
+  const cx=x1+t*dx, cy=y1+t*dy;
+  return Math.hypot(px-cx,py-cy);
+}
+function projectOnElement(elId,px,py){
+  const el=getElement(elId), a=getNode(el.n1), b=getNode(el.n2);
+  const pa=toScreen(a.x,a.y), pb=toScreen(b.x,b.y);
+  const dx=pb.x-pa.x, dy=pb.y-pa.y; const len2=dx*dx+dy*dy;
+  let t = len2>0 ? ((px-pa.x)*dx+(py-pa.y)*dy)/len2 : 0;
+  return Math.max(0,Math.min(1,t));
+}
+
+/* =========================================================================
+   TOOLBAR
+   ========================================================================= */
+const ICONS = {
+  select:'<svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L11 19z"/></svg>',
+  node:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/></svg>',
+  bar:'<svg viewBox="0 0 24 24"><circle cx="5" cy="19" r="2.3"/><circle cx="19" cy="5" r="2.3"/><path d="M6.8 17.2L17.2 6.8"/></svg>',
+  del:'<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>',
+  run:'<svg viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg>',
+  fit:'<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+  neu:'<svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 4v16"/></svg>',
+  dl:'<svg viewBox="0 0 24 24"><path d="M12 3v13M7 11l5 5 5-5M4 21h16"/></svg>',
+  ul:'<svg viewBox="0 0 24 24"><path d="M12 21V8M7 12l5-5 5 5M4 21h16"/></svg>',
+  undo:'<svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2"/></svg>',
+  redo:'<svg viewBox="0 0 24 24"><path d="M15 7l5 5-5 5M20 12H9a5 5 0 0 0 0 10h2"/></svg>',
+  grid:'<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z M4 9.33h16 M4 14.67h16 M9.33 4v16 M14.67 4v16"/></svg>',
+  gear:'<svg viewBox="0 0 24 24"><path d="M3 6h9M17 6h4M3 12h3M9 12h12M3 18h11M19 18h2"/><circle cx="13" cy="6" r="2"/><circle cx="6" cy="12" r="2"/><circle cx="15" cy="18" r="2"/></svg>',
+  book:'<svg viewBox="0 0 24 24"><path d="M4 5c3-1.5 6-1.5 8 0v14c-2-1.5-5-1.5-8 0zM20 5c-3-1.5-6-1.5-8 0v14c2-1.5 5-1.5 8 0z"/></svg>',
+};
+function svgStroke(html){ return html; }
+
+function buildToolbar(){
+  const tb=document.getElementById('toolbar');
+  const showSnapToggle = (mode==='addNode' || mode==='addBar');
+  const showNewNodesToggle = (mode==='addBar');
+  tb.innerHTML = `
+    <div class="tb-group">
+      <button class="tb-btn" data-mode="select" title="Zaznacz / przesuń (V)">${ICONS.select}<span>Zaznacz</span></button>
+      <button class="tb-btn" data-mode="addNode" title="Dodaj węzeł (N)">${ICONS.node}<span>Węzeł</span></button>
+      <button class="tb-btn" data-mode="addBar" title="Dodaj pręt (B)">${ICONS.bar}<span>Pręt</span></button>
+      <button class="tb-btn" data-mode="delete" title="Usuń (Del)">${ICONS.del}<span>Usuń</span></button>
+    </div>
+    <div class="tb-group">
+      <span class="tb-label">Przekrój</span>
+      <select id="defSectionSel" class="tb-select"></select>
+      <span class="tb-label">Materiał</span>
+      <select id="defMaterialSel" class="tb-select"></select>
+    </div>
+    <div class="tb-group">
+      <button class="tb-btn" id="btnNew" title="Nowy model">${ICONS.neu}<span>Nowy</span></button>
+      <button class="tb-btn" id="btnExamples" title="Przykłady">${ICONS.book}<span>Przykład</span></button>
+      <button class="tb-btn" id="btnExport" title="Eksportuj JSON">${ICONS.dl}<span>Zapisz</span></button>
+      <button class="tb-btn" id="btnImport" title="Importuj JSON">${ICONS.ul}<span>Wczytaj</span></button>
+      <button class="tb-btn" id="btnUndo" title="Cofnij (Ctrl+Z)" disabled>${ICONS.undo}<span>Cofnij</span></button>
+      <button class="tb-btn" id="btnRedo" title="Ponów (Ctrl+Y)" disabled>${ICONS.redo}<span>Ponów</span></button>
+      <button class="tb-btn" id="btnOptions" title="Opcje programu">${ICONS.gear}<span>Opcje</span></button>
+      <input type="file" id="fileImport" accept="application/json" style="display:none;">
+    </div>
+    ${(showSnapToggle||showNewNodesToggle)? `<div class="tb-group">
+      ${showSnapToggle? `<button class="tb-btn ${snapEnabled?'active':''}" id="snapToggleBtn" title="Przyciąganie do siatki (${snapSize} m)">${ICONS.grid}</button>`:''}
+      ${showNewNodesToggle? `<button class="tb-btn ${allowNewNodesInBarMode?'active':''}" id="newNodesToggleBtn" title="Twórz nowe węzły podczas rysowania pręta">${ICONS.node}</button>`:''}
+    </div>` : ''}
+    <div class="tb-group" style="margin-left:auto;border-right:none;">
+      <button class="tb-btn primary" id="btnRun" title="Uruchom obliczenia (Enter)">${ICONS.run}<span>OBLICZ</span></button>
+    </div>
+  `;
+  tb.querySelectorAll('[data-mode]').forEach(b=>{
+    b.addEventListener('click', ()=>setMode(b.dataset.mode));
+  });
+  document.getElementById('btnNew').addEventListener('click', newModel);
+  document.getElementById('btnRun').addEventListener('click', runAnalysis);
+  document.getElementById('btnExport').addEventListener('click', exportModel);
+  document.getElementById('btnImport').addEventListener('click', ()=>document.getElementById('fileImport').click());
+  document.getElementById('fileImport').addEventListener('change', importModelFile);
+  document.getElementById('btnExamples').addEventListener('click', (e)=>toggleExamplesMenu(e));
+  document.getElementById('btnUndo').addEventListener('click', doUndo);
+  document.getElementById('btnRedo').addEventListener('click', doRedo);
+  document.getElementById('btnOptions').addEventListener('click', openOptionsModal);
+  if(showSnapToggle) document.getElementById('snapToggleBtn').addEventListener('click', ()=>{ snapEnabled=!snapEnabled; buildToolbar(); });
+  if(showNewNodesToggle) document.getElementById('newNodesToggleBtn').addEventListener('click', ()=>{ allowNewNodesInBarMode=!allowNewNodesInBarMode; buildToolbar(); });
+  refreshDefaultSelectors();
+  updateToolbarActive();
+  updateUndoRedoButtons();
+}
+function refreshDefaultSelectors(){
+  const secSel=document.getElementById('defSectionSel');
+  const matSel=document.getElementById('defMaterialSel');
+  if(!secSel||!matSel) return;
+  secSel.innerHTML = sections.map(s=>`<option value="${s.id}" ${s.id===defaultSectionId?'selected':''}>${s.name}</option>`).join('');
+  matSel.innerHTML = materials.map(m=>`<option value="${m.id}" ${m.id===defaultMaterialId?'selected':''}>${m.name}</option>`).join('');
+  secSel.onchange=()=>{ defaultSectionId=+secSel.value; };
+  matSel.onchange=()=>{ defaultMaterialId=+matSel.value; };
+}
+function updateToolbarActive(){
+  document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active', b.dataset.mode===mode));
+}
+function setMode(m){
+  mode=m; barStart=null; selection={type:null,id:null};
+  const hints={select:'Tryb: Zaznacz — kliknij węzeł/pręt, przeciągnij aby przesunąć lub przewinąć widok',
+    addNode:'Tryb: Dodaj węzeł — kliknij na płótnie, aby dodać węzeł',
+    addBar:'Tryb: Dodaj pręt — kliknij węzeł początkowy, potem końcowy (klik w puste miejsce tworzy nowy węzeł)',
+    delete:'Tryb: Usuń — kliknij węzeł lub pręt, aby go usunąć'};
+  setStatusHint(hints[m]||'');
+  buildToolbar(); renderSidebar(); render();
+}
+/* =========================================================================
+   OPTIONS MODAL
+   ========================================================================= */
+function setTheme(theme){
+  currentTheme=theme;
+  document.documentElement.setAttribute('data-theme', theme==='dark'?'dark':'light');
+  clearCssCache();
+  render();
+  if(document.getElementById('optionsOverlay')) openOptionsModal(); // refresh active state
+}
+function optionRowTheme(){
+  return `<div style="margin-bottom:16px;">
+    <div style="font-size:12.5px;font-weight:600;margin-bottom:6px;">Motyw aplikacji</div>
+    <div class="btnrow">
+      <button class="mini ${currentTheme==='light'?'on':''}" id="themeLightBtn">Jasny</button>
+      <button class="mini ${currentTheme==='dark'?'on':''}" id="themeDarkBtn">Ciemny</button>
+    </div>
+  </div>`;
+}
+function optionRowToggle(id,label,checked,desc){
+  return `<div style="margin-bottom:14px;">
+    <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px;">
+      <span style="font-size:12.5px;font-weight:600;">${label}</span>
+      <input type="checkbox" id="${id}" ${checked?'checked':''} style="width:18px;height:18px;flex:0 0 auto;accent-color:var(--accent);">
+    </label>
+    ${desc? `<div class="muted" style="margin-top:3px;">${desc}</div>`:''}
+  </div>`;
+}
+function openOptionsModal(){
+  closeOptionsModal();
+  const overlay=document.createElement('div');
+  overlay.id='optionsOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:#0f172a99;z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML=`
+    <div id="optionsCard" style="background:var(--sidebar-bg);color:var(--text);border-radius:12px;max-width:420px;width:100%;max-height:86vh;overflow-y:auto;box-shadow:0 20px 60px #0008;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--sidebar-border);position:sticky;top:0;background:var(--sidebar-bg);">
+        <h2 style="margin:0;font-size:14.5px;">Opcje programu</h2>
+        <button id="optionsCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-dim);line-height:1;padding:4px;">✕</button>
+      </div>
+      <div style="padding:16px 18px;font-size:12.5px;">
+        ${optionRowTheme()}
+        <hr class="sep">
+        ${optionRowToggle('axialOpt','Uwzględnij odkształcenia osiowe (N/EA)', includeAxialDeformation,
+          'Gdy wyłączone, pręty są przyjmowane jako praktycznie nierozciągliwe/nieściśliwe wzdłuż swojej osi (sztywność EA jest sztucznie zwiększana) — sztywność zginania (EI) i naprężenia pozostają liczone na rzeczywistym przekroju. Wymaga ponownego uruchomienia obliczeń.')}
+        ${optionRowToggle('selfWeightOpt','Uwzględnij ciężar własny prętów', includeSelfWeight,
+          'Dolicza do każdego pręta niewidoczne na rysunku obciążenie ciągłe pionowe = gęstość materiału × pole przekroju × g. Gęstość materiału ustawia się w bibliotece materiałów. Wymaga ponownego uruchomienia obliczeń.')}
+        ${optionRowToggle('hideLSOpt','Ukryj obciążenia i podpory przy wynikach', hideLoadsSupportsInResults,
+          'Czysto wizualne — chowa strzałki sił i symbole podpór, gdy widoczny jest przynajmniej jeden wykres wyników (odkształcenie, N, T, M, σ lub reakcje).')}
+        ${optionRowToggle('gridOpt','Pokaż siatkę tła', showBackgroundGrid, '')}
+        ${optionRowToggle('labelsOpt','Pokaż numery węzłów i prętów', showIdLabels, '')}
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',(e)=>{ if(e.target===overlay) closeOptionsModal(); });
+  document.getElementById('optionsCloseBtn').addEventListener('click', closeOptionsModal);
+  document.getElementById('themeLightBtn').addEventListener('click', ()=>setTheme('light'));
+  document.getElementById('themeDarkBtn').addEventListener('click', ()=>setTheme('dark'));
+  document.getElementById('axialOpt').addEventListener('change',(e)=>{ includeAxialDeformation=e.target.checked; invalidateResults(); renderSidebar(); render(); });
+  document.getElementById('selfWeightOpt').addEventListener('change',(e)=>{ includeSelfWeight=e.target.checked; invalidateResults(); renderSidebar(); render(); });
+  document.getElementById('hideLSOpt').addEventListener('change',(e)=>{ hideLoadsSupportsInResults=e.target.checked; render(); });
+  document.getElementById('gridOpt').addEventListener('change',(e)=>{ showBackgroundGrid=e.target.checked; render(); });
+  document.getElementById('labelsOpt').addEventListener('change',(e)=>{ showIdLabels=e.target.checked; render(); });
+}
+function closeOptionsModal(){ const o=document.getElementById('optionsOverlay'); if(o) o.remove(); }
+
+function newModel(){
+  nodes=[]; elements=[]; nextNodeId=1; nextElemId=1;
+  selection={type:null,id:null}; invalidateResults();
+  fitView(); setMode('select'); renderSidebar(); render();
+}
+
+/* =========================================================================
+   EXAMPLES
+   ========================================================================= */
+function toggleExamplesMenu(e){
+  e.stopPropagation();
+  let old=document.getElementById('exMenu'); if(old){ old.remove(); return; }
+  const btn=e.currentTarget; const r=btn.getBoundingClientRect();
+  const menu=document.createElement('div'); menu.id='exMenu';
+  menu.style.cssText=`position:fixed;top:${r.bottom+4}px;left:${r.left}px;background:#1b2430;border:1px solid #3d4c5e;
+    border-radius:8px;padding:4px;z-index:100;box-shadow:0 8px 24px #0006;min-width:210px;`;
+  const items=[['Belka wolnopodparta z obc. ciągłym','ssbeam'],['Wspornik z siłą i momentem','cantilever'],['Rama portalowa','portal'],['Belka Gerbera (z przegubem)','gerber']];
+  menu.innerHTML = items.map(([label,key])=>`<div class="exitem" data-ex="${key}" style="padding:8px 10px;color:#e8edf3;font-size:12px;cursor:pointer;border-radius:5px;">${label}</div>`).join('');
+  document.body.appendChild(menu);
+  menu.querySelectorAll('.exitem').forEach(it=>{
+    it.addEventListener('mouseenter',()=>it.style.background='#2a3644');
+    it.addEventListener('mouseleave',()=>it.style.background='transparent');
+    it.addEventListener('click',()=>{ loadExample(it.dataset.ex); menu.remove(); });
+  });
+  setTimeout(()=>document.addEventListener('click', function h(){ const m=document.getElementById('exMenu'); if(m) m.remove(); document.removeEventListener('click',h); }),0);
+}
+
+function loadExample(key){
+  newModelSilent();
+  if(key==='ssbeam'){
+    const a=createNode(0,0), b=createNode(6,0);
+    getNode(a).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'free'}};
+    getNode(b).support={angleDeg:0, ux:{type:'free'}, uy:{type:'fixed',delta:0}, rz:{type:'free'}};
+    const e1=createElement(a,b);
+    getElement(e1).q={qStart:10,qEnd:10,angle:270};
+  } else if(key==='cantilever'){
+    const a=createNode(0,0), b=createNode(4,0);
+    getNode(a).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'fixed',delta:0}};
+    getNode(b).force={F:15, angle:270};
+    getNode(b).moment={M:10};
+    createElement(a,b);
+  } else if(key==='portal'){
+    const a=createNode(0,0), b=createNode(0,3), c=createNode(5,3), d=createNode(5,0);
+    getNode(a).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'fixed',delta:0}};
+    getNode(d).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'fixed',delta:0}};
+    getNode(b).force={F:12, angle:0};
+    createElement(a,b); const beam=createElement(b,c); createElement(c,d);
+    getElement(beam).q={qStart:6,qEnd:6,angle:270};
+  } else if(key==='gerber'){
+    const a=createNode(0,0), b=createNode(4,0), c=createNode(8,0);
+    getNode(a).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'free'}};
+    getNode(b).support={angleDeg:0, ux:{type:'free'}, uy:{type:'fixed',delta:0}, rz:{type:'free'}};
+    getNode(c).support={angleDeg:0, ux:{type:'free'}, uy:{type:'fixed',delta:0}, rz:{type:'free'}};
+    const e1=createElement(a,b); const e2=createElement(b,c);
+    getElement(e1).hingeEnd=true; getElement(e2).hingeStart=true;
+    getElement(e1).q={qStart:8,qEnd:8,angle:270}; getElement(e2).q={qStart:8,qEnd:8,angle:270};
+  }
+  fitView(); selection={type:null,id:null}; renderSidebar(); render();
+}
+function newModelSilent(){ nodes=[]; elements=[]; nextNodeId=1; nextElemId=1; invalidateResults(); }
+
+/* =========================================================================
+   EXPORT / IMPORT
+   ========================================================================= */
+function exportModel(){
+  const data={nodes,elements,materials,sections,nextNodeId,nextElemId,nextMatId,nextSecId,defaultSectionId,defaultMaterialId};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='model-mes-2d.json'; a.click();
+  URL.revokeObjectURL(url);
+}
+function importModelFile(e){
+  const file=e.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const data=JSON.parse(reader.result);
+      nodes=data.nodes||[]; elements=data.elements||[];
+      materials=data.materials||materials; sections=data.sections||sections;
+      nextNodeId=data.nextNodeId||uid(nodes); nextElemId=data.nextElemId||uid(elements);
+      nextMatId=data.nextMatId||uid(materials); nextSecId=data.nextSecId||uid(sections);
+      defaultSectionId=data.defaultSectionId||sections[0].id; defaultMaterialId=data.defaultMaterialId||materials[0].id;
+      invalidateResults(); selection={type:null,id:null};
+      fitView(); buildToolbar(); renderSidebar(); render();
+    }catch(err){ setStatusHint('Błąd wczytywania pliku: '+err.message); }
+  };
+  reader.readAsText(file);
+  e.target.value='';
+}
+
+/* =========================================================================
+   EVENTS
+   ========================================================================= */
+function onDown(e){
+  if(e.button!==0) return;
+  const rect=canvas.getBoundingClientRect();
+  handlePointerDown(e.clientX-rect.left, e.clientY-rect.top);
+}
+function handlePointerDown(px,py){
+  if(mode==='select'){
+    const nid=hitTestNode(px,py);
+    if(nid!=null){ selection={type:'node',id:nid}; dragNode=nid; renderSidebar(); render(); return; }
+    const eid=hitTestElement(px,py);
+    if(eid!=null){
+      selection={type:'element',id:eid};
+      if(diagrams && diagrams[eid]!=null){ probe.elId=eid; probe.t=projectOnElement(eid,px,py); }
+      renderSidebar(); render(); return;
+    }
+    selection={type:null,id:null};
+    panState={startX:px,startY:py,startOffX:view.offX,startOffY:view.offY,moved:false};
+    renderSidebar(); render();
+  } else if(mode==='addNode' || mode==='addBar' || mode==='delete'){
+    // Defer the actual action to pointer-up: a drag from here should pan the view
+    // (and, mid-pinch, get cleared entirely by onTouchStart) rather than immediately
+    // place/delete something — only a genuine tap (no significant movement) acts.
+    panState={startX:px,startY:py,startOffX:view.offX,startOffY:view.offY,moved:false,tapMode:mode};
+  }
+}
+function performTapAction(tapMode,px,py){
+  const mp=toModel(px,py);
+  if(tapMode==='addNode'){
+    createNode(mp.x,mp.y); renderSidebar(); render();
+  } else if(tapMode==='addBar'){
+    const nid=hitTestNode(px,py);
+    if(nid==null && !allowNewNodesInBarMode){
+      setStatusHint('Tryb: Dodaj pręt — „Nowe węzły” wyłączone: kliknij istniejący węzeł');
+      return;
+    }
+    const useId = nid!=null? nid : createNode(mp.x,mp.y);
+    if(barStart==null){ barStart=useId; setStatusHint('Tryb: Dodaj pręt — wybierz węzeł końcowy'); }
+    else if(barStart!==useId){ createElement(barStart,useId); barStart=useId; }
+    renderSidebar(); render();
+  } else if(tapMode==='delete'){
+    const nid=hitTestNode(px,py);
+    if(nid!=null){ deleteNode(nid); renderSidebar(); render(); return; }
+    const eid=hitTestElement(px,py);
+    if(eid!=null){ deleteElement(eid); renderSidebar(); render(); }
+  }
+}
+function onMove(e){
+  const rect=canvas.getBoundingClientRect();
+  handlePointerMove(e.clientX-rect.left, e.clientY-rect.top);
+}
+function handlePointerMove(px,py){
+  mouseModel=toModel(px,py);
+  const coordsEl=document.getElementById('coords');
+  if(coordsEl) coordsEl.textContent = `x=${mouseModel.x.toFixed(2)} m,  y=${mouseModel.y.toFixed(2)} m`;
+  if(dragNode!=null){
+    const n=getNode(dragNode);
+    n.x=snap(mouseModel.x); n.y=snap(mouseModel.y);
+    invalidateResults();
+    render();
+    return;
+  }
+  if(panState){
+    const dx=px-panState.startX, dy=py-panState.startY;
+    if(Math.hypot(dx,dy)>6){ panState.moved=true; userAdjustedView=true; }
+    view.offX=panState.startOffX+dx; view.offY=panState.startOffY+dy;
+    render();
+    return;
+  }
+  if(mode==='select'){
+    const nid=hitTestNode(px,py);
+    const eid = nid==null? hitTestElement(px,py): null;
+    if(nid!==hoverNodeId || eid!==hoverElemId){ hoverNodeId=nid; hoverElemId=eid; render(); }
+    canvas.style.cursor = (nid!=null||eid!=null)? 'pointer':(panState?'grabbing':'default');
+  } else {
+    canvas.style.cursor='crosshair';
+  }
+}
+function onUp(e){ handlePointerUp(); }
+function handlePointerUp(){
+  if(dragNode!=null){ dragNode=null; renderSidebar(); }
+  if(panState && panState.tapMode && !panState.moved){
+    performTapAction(panState.tapMode, panState.startX, panState.startY);
+  }
+  panState=null;
+}
+function onWheel(e){
+  e.preventDefault();
+  userAdjustedView=true;
+  const rect=canvas.getBoundingClientRect();
+  const px=e.clientX-rect.left, py=e.clientY-rect.top;
+  const before=toModel(px,py);
+  const factor=e.deltaY<0?1.12:1/1.12;
+  const newScale=Math.max(2,Math.min(1200,view.scale*factor));
+  view.offX = px-before.x*newScale;
+  view.offY = py+before.y*newScale;
+  view.scale=newScale;
+  render();
+}
+function zoomBy(factor){
+  userAdjustedView=true;
+  const rect=canvas.getBoundingClientRect();
+  const cx=rect.width/2, cy=rect.height/2;
+  const before=toModel(cx,cy);
+  const newScale=Math.max(2,Math.min(1200,view.scale*factor));
+  view.offX=cx-before.x*newScale; view.offY=cy+before.y*newScale; view.scale=newScale;
+  render();
+}
+function onKey(e){
+  const tag=(e.target.tagName||'').toUpperCase();
+  if(tag==='INPUT'||tag==='SELECT'||tag==='TEXTAREA') return;
+  if((e.ctrlKey||e.metaKey) && !e.shiftKey && (e.key==='z'||e.key==='Z')){ e.preventDefault(); doUndo(); return; }
+  if((e.ctrlKey||e.metaKey) && ((e.key==='y'||e.key==='Y') || (e.shiftKey && (e.key==='z'||e.key==='Z')))){ e.preventDefault(); doRedo(); return; }
+  if(e.key==='Escape'){
+    if(document.getElementById('optionsOverlay')){ closeOptionsModal(); return; }
+    setMode('select'); return;
+  }
+  if(e.key==='Delete'||e.key==='Backspace'){
+    if(selection.type==='node'){ deleteNode(selection.id); renderSidebar(); render(); }
+    else if(selection.type==='element'){ deleteElement(selection.id); renderSidebar(); render(); }
+    return;
+  }
+  if(e.key==='v'||e.key==='V') setMode('select');
+  if(e.key==='n'||e.key==='N') setMode('addNode');
+  if(e.key==='b'||e.key==='B') setMode('addBar');
+  if(e.key==='Enter') runAnalysis();
+}
+
+/* ---- touch: 1 finger = tap/select/drag/pan (reuses pointer logic), 2 fingers = pinch-zoom ---- */
+let touchPinch=null;
+function touchPt(t){
+  const rect=canvas.getBoundingClientRect();
+  return {x:t.clientX-rect.left, y:t.clientY-rect.top};
+}
+function touchDist(e){
+  const a=touchPt(e.touches[0]), b=touchPt(e.touches[1]);
+  return Math.hypot(b.x-a.x,b.y-a.y);
+}
+function touchMid(e){
+  const a=touchPt(e.touches[0]), b=touchPt(e.touches[1]);
+  return {x:(a.x+b.x)/2,y:(a.y+b.y)/2};
+}
+function onTouchStart(e){
+  e.preventDefault();
+  if(e.touches.length===1){
+    touchPinch=null;
+    const p=touchPt(e.touches[0]);
+    handlePointerDown(p.x,p.y);
+  } else if(e.touches.length>=2){
+    dragNode=null; panState=null;
+    const mid=touchMid(e);
+    const before=toModel(mid.x,mid.y);
+    touchPinch={ startDist:touchDist(e), startScale:view.scale, anchorModel:before };
+  }
+}
+function onTouchMove(e){
+  e.preventDefault();
+  if(e.touches.length===1 && !touchPinch){
+    const p=touchPt(e.touches[0]);
+    handlePointerMove(p.x,p.y);
+  } else if(e.touches.length>=2 && touchPinch){
+    userAdjustedView=true;
+    const newDist=touchDist(e);
+    const newScale=Math.max(2,Math.min(1200, touchPinch.startScale*(newDist/touchPinch.startDist)));
+    const mid=touchMid(e);
+    view.scale=newScale;
+    view.offX = mid.x - touchPinch.anchorModel.x*newScale;
+    view.offY = mid.y + touchPinch.anchorModel.y*newScale;
+    render();
+  }
+}
+function onTouchEnd(e){
+  e.preventDefault();
+  if(e.touches.length===0){ handlePointerUp(); touchPinch=null; }
+  else if(e.touches.length===1){ touchPinch=null; dragNode=null; panState=null; }
+}
+
+function initEvents(){
+  canvas.addEventListener('mousedown', onDown);
+  canvas.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  canvas.addEventListener('wheel', onWheel, {passive:false});
+  canvas.addEventListener('touchstart', onTouchStart, {passive:false});
+  canvas.addEventListener('touchmove', onTouchMove, {passive:false});
+  canvas.addEventListener('touchend', onTouchEnd, {passive:false});
+  canvas.addEventListener('touchcancel', onTouchEnd, {passive:false});
+  window.addEventListener('keydown', onKey);
+  window.addEventListener('resize', resizeCanvas);
+  window.addEventListener('orientationchange', ()=>setTimeout(resizeCanvas,150));
+  document.getElementById('zoomIn').addEventListener('click', ()=>zoomBy(1.25));
+  document.getElementById('zoomOut').addEventListener('click', ()=>zoomBy(1/1.25));
+  document.getElementById('zoomFit').addEventListener('click', ()=>{ fitView(); render(); });
+}
+
+/* =========================================================================
+   SIDEBAR — properties panel
+   ========================================================================= */
+let addMatFormOpen=false, addSecFormOpen=false, libraryCollapsed=false;
+let newSecCategoryState='katalog';   // 'katalog' | 'ksztalt' | 'wlasny'
+let newSecCatalogTypeState='IPN';    // klucz do CATALOG_DEFS
+let newSecShapeState='rect';         // dla 'ksztalt': rect|circ|pipe|box|ibeam|tee|angle
+
+function renderSidebar(){
+  checkAndPushHistory();
+  const sb=document.getElementById('sidebar');
+  sb.innerHTML = panelSelection() + panelResults() + panelLibrary();
+}
+
+/* =========================================================================
+   UNDO / REDO
+   Every mutating action in this app (create/delete/edit node or element,
+   library changes, split, import, examples...) ends by calling renderSidebar().
+   So instead of instrumenting every single mutation site, we take a snapshot
+   of the *model* (nodes/elements/materials/sections/counters — not UI state
+   like selection, view, or diagram toggles) each time renderSidebar runs, and
+   diff it against the previous one. A real difference = one completed user
+   action = one undo step. Continuous gestures (dragging a node) only call
+   renderSidebar once, at the end, so they collapse into a single step too.
+   ========================================================================= */
+function modelSnapshot(){
+  return JSON.stringify({nodes,elements,materials,sections,
+    nextNodeId,nextElemId,nextMatId,nextSecId,defaultSectionId,defaultMaterialId});
+}
+function checkAndPushHistory(){
+  const cur=modelSnapshot();
+  if(lastSnapshot!==null && cur!==lastSnapshot){
+    undoStack.push(lastSnapshot);
+    if(undoStack.length>MAX_HISTORY) undoStack.shift();
+    redoStack=[];
+  }
+  lastSnapshot=cur;
+  updateUndoRedoButtons();
+}
+function restoreSnapshot(json){
+  const d=JSON.parse(json);
+  nodes=d.nodes; elements=d.elements; materials=d.materials; sections=d.sections;
+  nextNodeId=d.nextNodeId; nextElemId=d.nextElemId; nextMatId=d.nextMatId; nextSecId=d.nextSecId;
+  defaultSectionId=d.defaultSectionId; defaultMaterialId=d.defaultMaterialId;
+  invalidateResults();
+  lastSnapshot=modelSnapshot(); // sync first, so the renderSidebar() call below doesn't re-trigger history
+  if(selection.type==='node' && !getNode(selection.id)) selection={type:null,id:null};
+  if(selection.type==='element' && !getElement(selection.id)) selection={type:null,id:null};
+  splitFormElId=null;
+  buildToolbar();
+  renderSidebar(); render();
+}
+function doUndo(){
+  if(undoStack.length===0) return;
+  redoStack.push(modelSnapshot());
+  restoreSnapshot(undoStack.pop());
+  setStatusHint('Cofnięto ostatnią zmianę.');
+}
+function doRedo(){
+  if(redoStack.length===0) return;
+  undoStack.push(modelSnapshot());
+  restoreSnapshot(redoStack.pop());
+  setStatusHint('Ponowiono zmianę.');
+}
+function updateUndoRedoButtons(){
+  const u=document.getElementById('btnUndo'), r=document.getElementById('btnRedo');
+  if(u) u.disabled = undoStack.length===0;
+  if(r) r.disabled = redoStack.length===0;
+}
+
+function panelSelection(){
+  if(selection.type==='node' && getNode(selection.id)) return panelNode(getNode(selection.id));
+  if(selection.type==='element' && getElement(selection.id)) return panelElement(getElement(selection.id));
+  return `<div class="panel"><h3>Właściwości</h3><div class="empty-state">Zaznacz węzeł lub pręt na rysunku (tryb „Zaznacz”),<br>aby edytować jego właściwości: podpory, obciążenia, przekrój i materiał.</div></div>`;
+}
+
+function presetMatches(n,key){
+  const sp=n.support; const t=(d)=>d?d.type:'free';
+  if(key==='none') return !sp || (t(sp.ux)==='free'&&t(sp.uy)==='free'&&t(sp.rz)==='free');
+  if(!sp) return false;
+  if(key==='fixed') return t(sp.ux)==='fixed'&&t(sp.uy)==='fixed'&&t(sp.rz)==='fixed';
+  if(key==='pin') return t(sp.ux)==='fixed'&&t(sp.uy)==='fixed'&&t(sp.rz)==='free';
+  if(key==='rollerH') return t(sp.ux)==='free'&&t(sp.uy)==='fixed'&&t(sp.rz)==='free';
+  if(key==='rollerV') return t(sp.ux)==='fixed'&&t(sp.uy)==='free'&&t(sp.rz)==='free';
+  return false;
+}
+function dirBlock(nodeId,key,label,dir,isRot){
+  const t=dir?dir.type:'free';
+  let html=`<div class="row"><label>${label}</label>
+    <select onchange="updateSupportDir(${nodeId},'${key}','type',this.value)">
+      <option value="free" ${t==='free'?'selected':''}>Swobodny</option>
+      <option value="fixed" ${t==='fixed'?'selected':''}>Sztywny</option>
+      <option value="spring" ${t==='spring'?'selected':''}>Sprężysty</option>
+    </select></div>`;
+  if(t==='spring') html+=`<div class="row"><label></label><input type="number" step="50" value="${dir.k||0}" onchange="updateSupportDir(${nodeId},'${key}','k',this.value)"><span class="unit">${isRot?'kNm/rad':'kN/m'}</span></div>`;
+  if(t!=='free') html+=`<div class="row"><label>${t==='spring'?'Wymuszenie':'Osiadanie'}</label><input type="number" step="0.5" value="${dir.delta||0}" onchange="updateSupportDir(${nodeId},'${key}','delta',this.value)"><span class="unit">${isRot?'°':'cm'}</span></div>`;
+  return html;
+}
+function panelNode(n){
+  let html = `<div class="panel">
+    <h3>Węzeł W${n.id}</h3>
+    ${pairRow('X',n.x,'0.1','m',`updateNodeCoord(${n.id},'x',this.value)`,'Y',n.y,'0.1','m',`updateNodeCoord(${n.id},'y',this.value)`)}
+    <div class="btnrow"><button class="mini danger" onclick="deleteNode(${n.id});renderSidebar();render();">Usuń węzeł</button></div>
+  </div>
+  <div class="panel">
+    <h3>Podpora</h3>
+    <div class="btnrow">
+      <button class="mini ${presetMatches(n,'none')?'on':''}" onclick="applySupportPreset(${n.id},'none')">Brak</button>
+      <button class="mini ${presetMatches(n,'fixed')?'on':''}" onclick="applySupportPreset(${n.id},'fixed')">Utwierdzenie</button>
+      <button class="mini ${presetMatches(n,'pin')?'on':''}" onclick="applySupportPreset(${n.id},'pin')">Przegubowa stała</button>
+      <button class="mini ${presetMatches(n,'rollerH')?'on':''}" onclick="applySupportPreset(${n.id},'rollerH')">Przesuwna pozioma</button>
+      <button class="mini ${presetMatches(n,'rollerV')?'on':''}" onclick="applySupportPreset(${n.id},'rollerV')">Przesuwna pionowa</button>
+    </div>
+    ${n.support? `<hr class="sep">
+      <div class="row"><label>Kąt podpory</label><input type="number" step="5" value="${n.support.angleDeg||0}" onchange="updateSupportAngle(${n.id},this.value)"><span class="unit">°</span></div>
+      <div class="btnrow" style="margin-top:-2px;">${angleNudgeButtons('nudgeSupportAngle',n.id)}</div>
+      <div class="muted" style="margin:6px 0;">Obraca lokalne kierunki H/V podpory względem osi globalnych (np. podpora na skarpie).</div>
+      ${dirBlock(n.id,'ux','Poziomy (H)',n.support.ux,false)}
+      ${dirBlock(n.id,'uy','Pionowy (V)',n.support.uy,false)}
+      ${dirBlock(n.id,'rz','Obrót (M)',n.support.rz,true)}
+    ` : '<div class="muted">Węzeł bez podpory.</div>'}
+  </div>
+  <div class="panel">
+    <h3>Siła skupiona <input type="checkbox" ${n.force?'checked':''} onchange="toggleNodeForce(${n.id},this.checked)"></h3>
+    ${n.force? `
+      ${pairRow('Wartość',n.force.F,'0.5','kN',`updateNodeForce(${n.id},'F',this.value)`,'Kąt',n.force.angle,'5','°',`updateNodeForce(${n.id},'angle',this.value)`)}
+      <div class="btnrow">
+        <button class="mini" onclick="setForceAngle(${n.id},270)">↓ w dół</button>
+        <button class="mini" onclick="setForceAngle(${n.id},90)">↑ w górę</button>
+        <button class="mini" onclick="setForceAngle(${n.id},0)">→ w prawo</button>
+        <button class="mini" onclick="setForceAngle(${n.id},180)">← w lewo</button>
+        ${angleNudgeButtons('nudgeForceAngle',n.id)}
+      </div>
+      <div class="muted">Kąt: 0°=w prawo, 90°=w górę (przeciwnie do zegara).</div>
+    ` : '<div class="muted">Brak siły w tym węźle.</div>'}
+  </div>
+  <div class="panel">
+    <h3>Moment skupiony <input type="checkbox" ${n.moment?'checked':''} onchange="toggleNodeMoment(${n.id},this.checked)"></h3>
+    ${n.moment? `
+      <div class="row"><label>Wartość</label><input type="number" step="0.5" value="${n.moment.M}" onchange="updateNodeMoment(${n.id},this.value)"><span class="unit">kNm</span></div>
+      <div class="muted">Wartość dodatnia = przeciwnie do ruchu wskazówek zegara.</div>
+    ` : '<div class="muted">Brak momentu w tym węźle.</div>'}
+  </div>`;
+  return html;
+}
+
+function panelElement(el){
+  const L=elLength(el);
+  const a=getNode(el.n1), b=getNode(el.n2);
+  const angDeg = Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI;
+  const qMode = (el.q && el.q.mode) || 'resultant';
+  return `<div class="panel">
+    <h3>Pręt P${el.id} <span class="tag">W${el.n1}→W${el.n2}</span></h3>
+    <div class="muted" style="margin-bottom:8px;">Długość L=${fmt(L,3)} m &nbsp;·&nbsp; kąt nachylenia=${fmt(angDeg,2)}°</div>
+    <div class="btnrow">
+      <button class="mini danger" onclick="deleteElement(${el.id});renderSidebar();render();">Usuń pręt</button>
+      <button class="mini" onclick="copyToClipboard('${fmt(L,3)}','długość P${el.id}')">Kopiuj długość</button>
+      <button class="mini" onclick="copyToClipboard('${fmt(angDeg,2)}','kąt P${el.id}')">Kopiuj kąt</button>
+      <button class="mini" onclick="openSplitForm(${el.id})">Podziel pręt</button>
+    </div>
+    ${splitFormElId===el.id? splitFormHtml(el) : ''}
+  </div>
+  <div class="panel">
+    <h3>Przekrój i materiał</h3>
+    <div class="row"><label>Przekrój</label><select onchange="updateElemField(${el.id},'sectionId',parseInt(this.value))">
+      ${sections.map(s=>`<option value="${s.id}" ${s.id===el.sectionId?'selected':''}>${s.name}</option>`).join('')}
+    </select></div>
+    <div class="row"><label>Materiał</label><select onchange="updateElemField(${el.id},'materialId',parseInt(this.value))">
+      ${materials.map(m=>`<option value="${m.id}" ${m.id===el.materialId?'selected':''}>${m.name}</option>`).join('')}
+    </select></div>
+    ${sectionAsymNote(getSection(el.sectionId))? `<div class="muted" style="margin-top:6px;">Przekrój niesymetryczny — środek ciężkości: e_góra=${fmtSmart(getSection(el.sectionId).cTop)} cm, e_dół=${fmtSmart(getSection(el.sectionId).cBot)} cm (względem lokalnej osi „góra” — zaznacz pręt, aby zobaczyć jej kierunek na rysunku).</div>` : ''}
+  </div>
+  <div class="panel">
+    <h3>Przeguby</h3>
+    <div class="checkline"><input type="checkbox" ${el.hingeStart?'checked':''} onchange="updateElemField(${el.id},'hingeStart',this.checked)"> Przegub na początku (przy W${el.n1})</div>
+    ${el.hingeStart? `<div class="row" style="margin:4px 0 10px 22px;"><label>Moment za przegubem</label><input type="number" step="1" value="${el.momentHingeStart||0}" onchange="updateElemField(${el.id},'momentHingeStart',parseFloat(this.value)||0)"><span class="unit">kNm</span></div>` : ''}
+    <div class="checkline"><input type="checkbox" ${el.hingeEnd?'checked':''} onchange="updateElemField(${el.id},'hingeEnd',this.checked)"> Przegub na końcu (przy W${el.n2})</div>
+    ${el.hingeEnd? `<div class="row" style="margin:4px 0 0 22px;"><label>Moment za przegubem</label><input type="number" step="1" value="${el.momentHingeEnd||0}" onchange="updateElemField(${el.id},'momentHingeEnd',parseFloat(this.value)||0)"><span class="unit">kNm</span></div>` : ''}
+    ${(el.hingeStart||el.hingeEnd)? `<div class="muted" style="margin-top:6px;">Moment działający bezpośrednio na pręt, po jego stronie przegubu (niezależnie od obrotu węzła). Dodatni = przeciwnie do ruchu wskazówek zegara.</div>` : ''}
+  </div>
+  <div class="panel">
+    <h3>Obciążenie ciągłe <input type="checkbox" ${el.q?'checked':''} onchange="toggleElemQ(${el.id},this.checked)"></h3>
+    ${el.q? `
+      <div class="btnrow" style="margin-bottom:8px;">
+        <button class="mini ${qMode==='resultant'?'on':''}" onclick="setQMode(${el.id},'resultant')">Wypadkowe</button>
+        <button class="mini ${qMode==='vertical'?'on':''}" onclick="setQMode(${el.id},'vertical')">Rzut pionowy</button>
+        <button class="mini ${qMode==='horizontal'?'on':''}" onclick="setQMode(${el.id},'horizontal')">Rzut poziomy</button>
+      </div>
+      ${pairRow('Wartość pocz.',el.q.qStart,'1','kN/m',`updateElemQ(${el.id},'qStart',this.value)`,'Wartość końc.',el.q.qEnd,'1','kN/m',`updateElemQ(${el.id},'qEnd',this.value)`)}
+      ${qMode==='resultant'? `
+        <div class="row"><label>Kąt</label><input type="number" step="5" value="${el.q.angle}" onchange="updateElemQ(${el.id},'angle',this.value)"><span class="unit">°</span></div>
+        <div class="btnrow">
+          <button class="mini" onclick="setQAngle(${el.id},270)">Pionowe ↓</button>
+          <button class="mini" onclick="setQAngle(${el.id},90)">Pionowe ↑</button>
+          <button class="mini" onclick="setQPerp(${el.id})">⊥ do pręta</button>
+          ${angleNudgeButtons('nudgeQAngle',el.id)}
+        </div>
+      ` : `
+        <div class="muted">Kierunek: ${qMode==='vertical'?'pionowo w dół dla wartości dodatnich (rzut na poziom)':'poziomo w prawo dla wartości dodatnich (rzut na pion)'}. Rzeczywista wartość na pręt jest przeliczana automatycznie wg jego nachylenia.</div>
+      `}
+    ` : '<div class="muted">Brak obciążenia ciągłego na tym pręcie.</div>'}
+  </div>
+  <div class="panel">
+    <h3>Temperatura <input type="checkbox" ${el.thermal?'checked':''} onchange="toggleElemT(${el.id},this.checked)"></h3>
+    ${el.thermal? `
+      ${pairRow('ΔT górna',el.thermal.dTtop,'1','°C',`updateElemT(${el.id},'dTtop',this.value)`,'ΔT dolna',el.thermal.dTbottom,'1','°C',`updateElemT(${el.id},'dTbottom',this.value)`)}
+      <div class="muted">„Górna” = strona lokalna +y pręta — zaznacz pręt, aby zobaczyć oznaczenie „góra” na rysunku.</div>
+    ` : '<div class="muted">Brak obciążenia termicznego na tym pręcie.</div>'}
+  </div>`;
+}
+
+/* ---- element split ---- */
+let splitFormElId=null, splitMode='single', splitT=0.5, splitN=2;
+function openSplitForm(elId){ splitFormElId=elId; splitMode='single'; splitT=0.5; splitN=2; renderSidebar(); }
+function closeSplitForm(){ splitFormElId=null; renderSidebar(); }
+function setSplitMode(m){ splitMode=m; renderSidebar(); }
+function setSplitT(v){ splitT=Math.max(0.02,Math.min(0.98,parseFloat(v)||0.5)); }
+function setSplitN(v){ splitN=Math.max(2,Math.min(30,Math.round(parseFloat(v)||2))); }
+function splitFormHtml(el){
+  const L=elLength(el);
+  return `<div class="card" style="margin-top:8px;background:var(--surface);border-color:var(--input-border);">
+    <div class="btnrow" style="margin-bottom:8px;">
+      <button class="mini ${splitMode==='single'?'on':''}" onclick="setSplitMode('single')">Pojedynczy podział</button>
+      <button class="mini ${splitMode==='multi'?'on':''}" onclick="setSplitMode('multi')">Podział na N części</button>
+    </div>
+    ${splitMode==='single'? `
+      <div class="row"><label>Punkt t (0–1)</label><input type="number" min="0.02" max="0.98" step="0.05" value="${splitT}" onchange="setSplitT(this.value)"></div>
+      <div class="muted">t liczone od W${el.n1} do W${el.n2}. Odległość od W${el.n1}: ${fmt(splitT*L,3)} m.</div>
+    ` : `
+      <div class="row"><label>Liczba części</label><input type="number" min="2" max="30" step="1" value="${splitN}" onchange="setSplitN(this.value)"></div>
+      <div class="muted">Każdy odcinek: ${fmt(L/splitN,3)} m.</div>
+    `}
+    <div class="btnrow" style="margin-top:8px;">
+      <button class="mini on" onclick="confirmSplit(${el.id})">Podziel</button>
+      <button class="mini" onclick="closeSplitForm()">Anuluj</button>
+    </div>
+  </div>`;
+}
+function splitElement(elId,points){
+  const el=getElement(elId); if(!el) return [];
+  const a=getNode(el.n1), b=getNode(el.n2);
+  const allT=[0,...points,1];
+  const nodeIds=[el.n1];
+  for(let i=1;i<allT.length-1;i++){
+    const t=allT[i];
+    nodeIds.push(createNode(a.x+(b.x-a.x)*t, a.y+(b.y-a.y)*t, true));
+  }
+  nodeIds.push(el.n2);
+  const newElIds=[];
+  for(let i=0;i<allT.length-1;i++){
+    const t0=allT[i], t1=allT[i+1];
+    const newId=createElement(nodeIds[i],nodeIds[i+1]);
+    if(newId==null) continue;
+    const ne=getElement(newId);
+    ne.sectionId=el.sectionId; ne.materialId=el.materialId;
+    ne.hingeStart = (i===0)? el.hingeStart : false;
+    ne.hingeEnd = (i===allT.length-2)? el.hingeEnd : false;
+    if(el.thermal) ne.thermal={dTtop:el.thermal.dTtop, dTbottom:el.thermal.dTbottom};
+    if(el.q){
+      const qAt=(t)=>el.q.qStart+(el.q.qEnd-el.q.qStart)*t;
+      ne.q={qStart:qAt(t0), qEnd:qAt(t1), angle:el.q.angle, mode:el.q.mode||'resultant'};
+    }
+    newElIds.push(newId);
+  }
+  deleteElement(elId);
+  return newElIds;
+}
+function confirmSplit(elId){
+  const el=getElement(elId); if(!el) return;
+  let points;
+  if(splitMode==='single'){ points=[splitT]; }
+  else { points=[]; for(let i=1;i<splitN;i++) points.push(i/splitN); }
+  const newIds=splitElement(elId,points);
+  closeSplitForm();
+  selection = newIds.length? {type:'element',id:newIds[0]} : {type:null,id:null};
+  invalidateResults(); renderSidebar(); render();
+}
+
+/* ---- node/element property update handlers ---- */
+function updateNodeCoord(id,axis,val){ const n=getNode(id); n[axis]=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
+function applySupportPreset(nodeId,key){
+  const n=getNode(nodeId);
+  const angleDeg = n.support? (n.support.angleDeg||0) : 0;
+  const F=()=>({type:'fixed',delta:0}), Fr=()=>({type:'free'});
+  if(key==='none'){ n.support=null; invalidateResults(); renderSidebar(); render(); return; }
+  let ux,uy,rz;
+  if(key==='fixed'){ ux=F();uy=F();rz=F(); }
+  else if(key==='pin'){ ux=F();uy=F();rz=Fr(); }
+  else if(key==='rollerH'){ ux=Fr();uy=F();rz=Fr(); }
+  else if(key==='rollerV'){ ux=F();uy=Fr();rz=Fr(); }
+  n.support={angleDeg,ux,uy,rz};
+  invalidateResults(); renderSidebar(); render();
+}
+function updateSupportAngle(id,val){ getNode(id).support.angleDeg=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
+function nudgeSupportAngle(id,delta){ const n=getNode(id); n.support.angleDeg=normalizeAngle((n.support.angleDeg||0)+delta); invalidateResults(); renderSidebar(); render(); }
+function updateSupportDir(id,key,field,val){
+  const n=getNode(id);
+  if(!n.support) n.support={angleDeg:0,ux:{type:'free'},uy:{type:'free'},rz:{type:'free'}};
+  if(!n.support[key]) n.support[key]={type:'free'};
+  if(field==='type'){
+    const old=n.support[key];
+    n.support[key]={type:val, k: val==='spring'?(old.k||1000):undefined, delta: old.delta||0};
+  } else if(field==='k'){ n.support[key].k=parseFloat(val)||0; }
+  else if(field==='delta'){ n.support[key].delta=parseFloat(val)||0; }
+  invalidateResults(); renderSidebar(); render();
+}
+function toggleNodeForce(id,on){ const n=getNode(id); n.force = on? {F:10,angle:270} : null; invalidateResults(); renderSidebar(); render(); }
+function updateNodeForce(id,field,val){ getNode(id).force[field]=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
+function setForceAngle(id,ang){ getNode(id).force.angle=ang; invalidateResults(); renderSidebar(); render(); }
+function nudgeForceAngle(id,delta){ const n=getNode(id); n.force.angle=normalizeAngle((n.force.angle||0)+delta); invalidateResults(); renderSidebar(); render(); }
+function toggleNodeMoment(id,on){ const n=getNode(id); n.moment = on? {M:10} : null; invalidateResults(); renderSidebar(); render(); }
+function updateNodeMoment(id,val){ getNode(id).moment.M=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
+
+function updateElemField(id,field,val){ const el=getElement(id); el[field]=val; invalidateResults(); renderSidebar(); render(); }
+function toggleElemQ(id,on){ const el=getElement(id); el.q = on? {qStart:5,qEnd:5,angle:270,mode:'resultant'} : null; invalidateResults(); renderSidebar(); render(); }
+function setQMode(id,mode){
+  const el=getElement(id);
+  el.q.mode=mode;
+  if(mode==='vertical') el.q.angle=270;
+  else if(mode==='horizontal') el.q.angle=0;
+  invalidateResults(); renderSidebar(); render();
+}
+function updateElemQ(id,field,val){ getElement(id).q[field]=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
+function setQAngle(id,ang){ getElement(id).q.angle=ang; invalidateResults(); renderSidebar(); render(); }
+function nudgeQAngle(id,delta){ const el=getElement(id); el.q.angle=normalizeAngle((el.q.angle||0)+delta); invalidateResults(); renderSidebar(); render(); }
+function setQPerp(id){
+  const el=getElement(id), a=getNode(el.n1), b=getNode(el.n2);
+  let angDeg = Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI + 90;
+  el.q.angle = Math.round(angDeg*10)/10;
+  invalidateResults(); renderSidebar(); render();
+}
+function toggleElemT(id,on){ const el=getElement(id); el.thermal = on? {dTtop:20,dTbottom:0} : null; invalidateResults(); renderSidebar(); render(); }
+function updateElemT(id,field,val){ getElement(id).thermal[field]=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
+
+/* =========================================================================
+   SIDEBAR — results panel
+   ========================================================================= */
+function panelResults(){
+  if(solveWarning && !solved){
+    return `<div class="panel"><h3>Wyniki</h3><div class="warn">${solveWarning}</div>
+      <button class="primary-btn" onclick="runAnalysis()">Uruchom obliczenia</button></div>`;
+  }
+  if(!solved){
+    return `<div class="panel"><h3>Wyniki</h3><div class="empty-state">Zbuduj model i kliknij <b>OBLICZ</b> w górnym pasku,<br>aby zobaczyć odkształcenia, wykresy M/T/N i naprężenia.</div></div>`;
+  }
+  let html = `<div class="panel"><h3>Wyniki <span class="tag">rozwiązano</span></h3>`;
+  if(solveWarning) html += `<div class="warn">${solveWarning}</div>`;
+  html += reactionsTableHtml();
+  html += `</div>`;
+  html += diagramTogglesHtml();
+  html += probePanelHtml();
+  return html;
+}
+function reactionsTableHtml(){
+  const supNodes = nodes.filter(n=>n.support);
+  if(supNodes.length===0) return '<div class="muted">Model nie ma podpór.</div>';
+  let rows='';
+  supNodes.forEach(n=>{
+    const idx=solved.nodeIndex[n.id];
+    const Rx=solved.Rglobal[3*idx], Ry=solved.Rglobal[3*idx+1], Rm=solved.Rglobal[3*idx+2];
+    rows+=`<tr><td>W${n.id}</td><td>${fmtSmart(Rx)}</td><td>${fmtSmart(Ry)}</td><td>${fmtSmart(Rm)}</td></tr>`;
+  });
+  return `<table class="rtab"><thead><tr><th>Węzeł</th><th>Rx [kN]</th><th>Ry [kN]</th><th>M [kNm]</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function diagToggleRow(label,varName,val,colorVar){
+  return `<div class="diagToggle ${val?'active':''}"><span class="lbl"><span class="swatch" style="background:var(${colorVar})"></span>${label}</span>
+    <input type="checkbox" ${val?'checked':''} onchange="toggleDiagram('${varName}',this.checked)"></div>`;
+}
+function diagramTogglesHtml(){
+  return `<div class="panel"><h3>Widok wyników</h3>
+    ${diagToggleRow('Reakcje podporowe','showReactions',showReactions,'--react-color')}
+    ${diagToggleRow('Forma odkształcenia','showDeform',showDeform,'--def-color')}
+    ${showDeform? deformSliderHtml() : ''}
+    ${diagToggleRow('Siła osiowa N','showN',showN,'--n-color')}
+    ${diagToggleRow('Siła tnąca T','showT',showT,'--t-color')}
+    ${diagToggleRow('Moment zginający M','showM',showM,'--m-color')}
+    ${diagToggleRow('Naprężenia σ (góra/dół)','showStress',showStress,'--s-color')}
+    ${(showN||showT||showM||showStress)? diagramSliderHtml() : ''}
+  </div>`;
+}
+function deformSliderHtml(){
+  return `<div class="row"><label style="min-width:96px;">Skala odkszt.</label><input type="range" min="0.1" max="5" step="0.1" value="${deformMult}" oninput="setDeformMult(this.value)"><span class="unit" id="deformMultLbl" style="width:34px;">${deformMult.toFixed(1)}×</span></div>`;
+}
+function diagramSliderHtml(){
+  return `<div class="row"><label style="min-width:96px;">Skala wykresów</label><input type="range" min="0.1" max="5" step="0.1" value="${diagMult}" oninput="setDiagMult(this.value)"><span class="unit" id="diagMultLbl" style="width:34px;">${diagMult.toFixed(1)}×</span></div>`;
+}
+function toggleDiagram(name,val){
+  if(name==='showDeform') showDeform=val;
+  else if(name==='showN') showN=val;
+  else if(name==='showT') showT=val;
+  else if(name==='showM') showM=val;
+  else if(name==='showStress') showStress=val;
+  else if(name==='showReactions') showReactions=val;
+  lastResultView[name]=val;
+  renderSidebar(); render();
+}
+function setDeformMult(v){ deformMult=parseFloat(v); const l=document.getElementById('deformMultLbl'); if(l) l.textContent=deformMult.toFixed(1)+'×'; render(); }
+function setDiagMult(v){ diagMult=parseFloat(v); const l=document.getElementById('diagMultLbl'); if(l) l.textContent=diagMult.toFixed(1)+'×'; render(); }
+
+function probePanelHtml(){
+  if(elements.length===0) return '';
+  if(probe.elId==null || !getElement(probe.elId)) probe.elId=elements[0].id;
+  const el=getElement(probe.elId);
+  const L=elLength(el);
+  const options = elements.map(e=>`<option value="${e.id}" ${e.id===probe.elId?'selected':''}>P${e.id} (W${e.n1}→W${e.n2})</option>`).join('');
+  const readoutHtml = (diagrams && diagrams[probe.elId]) ? probeReadoutHtml() : '<div class="muted">Uruchom obliczenia, aby odczytać dokładne wyniki.</div>';
+  return `<div class="panel"><h3>Sonda wyników <span class="tag">dokładny odczyt</span></h3>
+    <div class="row"><label>Pręt</label><select id="probeElSel" onchange="setProbeElement(parseInt(this.value))">${options}</select></div>
+    <div class="row"><label>Pozycja x</label><input type="range" id="probeSlider" min="0" max="100" step="0.5" value="${probe.t*100}" oninput="setProbeT(this.value/100)"><span class="unit" id="probeXLbl" style="width:56px;">${fmt(probe.t*L,2)} m</span></div>
+    <div id="probeReadout">${readoutHtml}</div>
+    <div class="muted" style="margin-top:6px;">Wskazówka: kliknij bezpośrednio na pręt na rysunku (tryb „Zaznacz”), aby ustawić sondę w wybranym miejscu.</div>
+  </div>`;
+}
+function probeReadoutHtml(){
+  const dg=diagrams[probe.elId]; const x=probe.t*dg.L;
+  const idx = elements.findIndex(e=>e.id===probe.elId);
+  const edRes = solved.results[idx];
+  const pr = FEM.pointResults(edRes,x);
+  return `<div class="probeval">
+    <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
+    <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
+    <div><span class="k">Ux (globalne)</span><span class="v">${fmt(pr.Ux_global*1000,2)} mm</span></div>
+    <div><span class="k">Uy (globalne)</span><span class="v">${fmt(pr.Uy_global*1000,2)} mm</span></div>
+    <div><span class="k">u (lokalne, osiowe)</span><span class="v">${fmt(pr.u_local*1000,2)} mm</span></div>
+    <div><span class="k">v (lokalne, poprzeczne)</span><span class="v">${fmt(pr.v_local*1000,2)} mm</span></div>
+    <div><span class="k">Obrót θ</span><span class="v">${fmt(pr.theta*1000,3)} mrad</span></div>
+    <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
+    <div><span class="k">Siła osiowa N</span><span class="v">${fmt(pr.N,3)} kN</span></div>
+    <div><span class="k">Siła tnąca T</span><span class="v">${fmt(pr.V,3)} kN</span></div>
+    <div><span class="k">Moment zginający M</span><span class="v">${fmt(pr.M,3)} kNm</span></div>
+    <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
+    <div><span class="k">Naprężenie σ góra</span><span class="v">${fmt(pr.sigTop/1000,2)} MPa</span></div>
+    <div><span class="k">Naprężenie σ dół</span><span class="v">${fmt(pr.sigBot/1000,2)} MPa</span></div>
+  </div>`;
+}
+function setProbeElement(id){ probe.elId=id; probe.t=0.5; renderSidebar(); render(); }
+function setProbeT(t){
+  probe.t=Math.max(0,Math.min(1,parseFloat(t)));
+  const dg = diagrams? diagrams[probe.elId] : null;
+  const L = dg? dg.L : elLength(getElement(probe.elId));
+  const lbl=document.getElementById('probeXLbl'); if(lbl) lbl.textContent=fmt(probe.t*L,2)+' m';
+  const ro=document.getElementById('probeReadout');
+  if(ro && diagrams && diagrams[probe.elId]) ro.innerHTML=probeReadoutHtml();
+  render();
+}
+
+/* =========================================================================
+   SIDEBAR — library panel (materials & sections)
+   ========================================================================= */
+function sectionAsymNote(s){
+  if(s.cTop==null||s.cBot==null||Math.abs(s.cTop-s.cBot)<1e-6) return '';
+  return `, e_g=${fmtSmart(s.cTop)}/e_d=${fmtSmart(s.cBot)} cm`;
+}
+function toggleLibraryCollapse(){ libraryCollapsed=!libraryCollapsed; renderSidebar(); }
+function panelLibrary(){
+  return `<div class="panel">
+    <h3 class="collapsible-head" onclick="toggleLibraryCollapse()">Biblioteka <span class="subtle-icon">${libraryCollapsed?'▸':'▾'}</span></h3>
+    <div id="libBody" style="${libraryCollapsed?'display:none;':''}">
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:6px;font-size:11.5px;color:var(--text-dim);">MATERIAŁY</div>
+        ${materials.map(m=>`<div class="listitem"><span>${m.name}<br><span class="muted">E=${m.E} GPa, α=${m.alpha}·10⁻⁵/°C, ρ=${m.density||0} kg/m³</span></span><span class="del" onclick="removeMaterial(${m.id})" title="Usuń">✕</span></div>`).join('')}
+        ${addMatFormOpen? addMatFormHtml() : `<div class="btnrow"><button class="mini" onclick="openAddMatForm()">+ Dodaj materiał</button></div>`}
+      </div>
+      <div class="card">
+        <div style="font-weight:600;margin-bottom:6px;font-size:11.5px;color:var(--text-dim);">PRZEKROJE</div>
+        ${sections.map(s=>`<div class="listitem"><span>${s.name}<br><span class="muted">A=${fmtSmart(s.A)} cm², I=${fmtSmart(s.I)} cm⁴${sectionAsymNote(s)}</span></span><span class="del" onclick="removeSection(${s.id})" title="Usuń">✕</span></div>`).join('')}
+        ${addSecFormOpen? addSecFormHtml() : `<div class="btnrow"><button class="mini" onclick="openAddSecForm()">+ Dodaj przekrój</button></div>`}
+      </div>
+    </div>
+  </div>`;
+}
+function openAddMatForm(){ addMatFormOpen=true; renderSidebar(); }
+function closeAddMatForm(){ addMatFormOpen=false; renderSidebar(); }
+function addMatFormHtml(){
+  return `<div class="card" style="margin-top:6px;background:var(--surface);border-color:var(--input-border);">
+    <div class="row"><label>Nazwa</label><input type="text" id="newMatName" value="Nowy materiał"></div>
+    <div class="row-pair">
+      <div class="half"><label>E</label><div class="inp-unit"><input type="number" step="1" id="newMatE" value="210"><span class="unit">GPa</span></div></div>
+      <div class="half"><label>α</label><div class="inp-unit"><input type="number" step="0.1" id="newMatAlpha" value="1.2"><span class="unit">×10⁻⁵/°C</span></div></div>
+    </div>
+    <div class="row"><label>Gęstość</label><input type="number" step="10" id="newMatDensity" value="7850"><span class="unit">kg/m³</span></div>
+    <div class="btnrow"><button class="mini on" onclick="addMaterial()">Dodaj</button><button class="mini" onclick="closeAddMatForm()">Anuluj</button></div>
+  </div>`;
+}
+function addMaterial(){
+  const name=document.getElementById('newMatName').value||'Materiał';
+  const E=parseFloat(document.getElementById('newMatE').value)||1;
+  const alpha=parseFloat(document.getElementById('newMatAlpha').value)||0;
+  const density=parseFloat(document.getElementById('newMatDensity').value)||0;
+  const id=nextMatId++;
+  materials.push({id,name,E,alpha,density});
+  addMatFormOpen=false; renderSidebar(); buildToolbar();
+}
+function removeMaterial(id){
+  if(elements.some(e=>e.materialId===id)){ setStatusHint('Nie można usunąć — materiał jest przypisany do pręta.'); return; }
+  if(materials.length<=1) return;
+  materials=materials.filter(m=>m.id!==id);
+  if(defaultMaterialId===id) defaultMaterialId=materials[0].id;
+  renderSidebar(); buildToolbar();
+}
+
+function openAddSecForm(){
+  addSecFormOpen=true;
+  newSecCategoryState='katalog'; newSecCatalogTypeState='IPN'; newSecShapeState='rect';
+  renderSidebar();
+  refreshSecName(); updateSecPreview();
+}
+function closeAddSecForm(){ addSecFormOpen=false; renderSidebar(); }
+
+/* =========================================================================
+   Kategoria 1: Z KATALOGU — wybór rodzaju profilu (IPN/IPE/HEA/HEB/UPN/UPE/T/L),
+   a potem rozmiaru z tablicy.
+   ========================================================================= */
+function catalogSizeLabel(kind,t){
+  return kind==='angle' ? t.name : `${t.name} (h=${t.h}×b=${t.b} cm)`;
+}
+function catalogFieldsHtml(){
+  const catType=newSecCatalogTypeState, def=CATALOG_DEFS[catType];
+  const showMirror = (def.kind==='tee' || def.kind==='angle');
+  return `<div class="row"><label>Profil</label><select id="newSecCatType" onchange="onCatalogTypeChange()">
+      ${CATALOG_ORDER.map(k=>`<option value="${k}" ${k===catType?'selected':''}>${CATALOG_DEFS[k].label}</option>`).join('')}
+    </select></div>
+    <div class="row"><label>Rozmiar</label><select id="newSecCatSize" onchange="onCatalogSizeChange()">
+      ${def.data.map((t,i)=>`<option value="${i}">${catalogSizeLabel(def.kind,t)}</option>`).join('')}
+    </select></div>
+    ${showMirror? `<div class="checkline"><input type="checkbox" id="newSecCatMirror" onchange="onCatalogSizeChange()"> Odwrócony</div>
+    <div class="muted">Przekrój niesymetryczny — zaznacz, aby odwrócić orientację względem osi pręta.</div>` : ''}
+    <div id="newSecPreview"></div>`;
+}
+function onCatalogTypeChange(){
+  newSecCatalogTypeState=document.getElementById('newSecCatType').value;
+  document.getElementById('newSecSubFields').innerHTML=catalogFieldsHtml();
+  refreshSecName(); updateSecPreview();
+}
+function onCatalogSizeChange(){ refreshSecName(); updateSecPreview(); }
+function refreshSecName(){
+  const nameInput=document.getElementById('newSecName');
+  if(!nameInput || newSecCategoryState!=='katalog') return;
+  const def=CATALOG_DEFS[newSecCatalogTypeState];
+  const sizeSel=document.getElementById('newSecCatSize'); if(!sizeSel) return;
+  const idx=parseInt(sizeSel.value)||0;
+  const mirrorEl=document.getElementById('newSecCatMirror');
+  const mirror = mirrorEl? mirrorEl.checked : false;
+  nameInput.value = def.data[idx].name + (mirror? ' (odwrócony)':'');
+}
+function computeCatalogGeom(){
+  const catType=newSecCatalogTypeState, def=CATALOG_DEFS[catType];
+  const idx=parseInt(document.getElementById('newSecCatSize').value)||0;
+  const t=def.data[idx];
+  const mirrorEl=document.getElementById('newSecCatMirror');
+  const mirror = mirrorEl? mirrorEl.checked : false;
+  if(def.kind==='sym'){
+    return {A:t.A,I:t.Ix,h:t.h,cTop:t.h/2,cBot:t.h/2,bw:t.b,
+      extra:{catType,catIdx:idx,catalog:t.name,drawKind:def.draw,tf:t.tf,tw:t.tw}};
+  }
+  if(def.kind==='tee'){
+    const e1=t.Ix/t.Wx1, e2=t.Ix/t.Wx2; // e1: bliżej stopki, e2: bliżej końca środnika
+    const cTop = mirror? e2 : e1, cBot = mirror? e1 : e2;
+    return {A:t.A,I:t.Ix,h:t.h,cTop,cBot,bw:t.b,
+      extra:{catType,catIdx:idx,catalog:t.name,mirrored:mirror,drawKind:def.draw,tf:t.s,tw:t.s}};
+  }
+  // kątownik (angle)
+  const cTop = mirror? t.zs : (t.h-t.zs), cBot = mirror? (t.h-t.zs) : t.zs;
+  return {A:t.A,I:t.Ix,h:t.h,cTop,cBot,bw:t.h,
+    extra:{catType,catIdx:idx,catalog:t.name,mirrored:mirror,drawKind:def.draw,t:t.t}};
+}
+
+/* =========================================================================
+   Kategoria 2: KSZTAŁT DEFINIOWANY — wybór kształtu, potem ręczne wymiary.
+   ========================================================================= */
+function shapeFieldsHtml(shape){
+  if(shape==='rect') return `<div class="row"><label>Szerokość b</label><input type="number" step="1" id="newSecB" value="20" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="row"><label>Wysokość h</label><input type="number" step="1" id="newSecH" value="40" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div id="newSecPreview"></div>`;
+  if(shape==='circ') return `<div class="row"><label>Średnica d</label><input type="number" step="1" id="newSecD" value="30" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div id="newSecPreview"></div>`;
+  if(shape==='pipe') return `<div class="row"><label>Śr. zewn. D</label><input type="number" step="0.5" id="newSecPipeD" value="20" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="row"><label>Grubość ścianki t</label><input type="number" step="0.1" id="newSecPipeT" value="0.8" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div id="newSecPreview"></div>`;
+  if(shape==='box') return `<div class="row"><label>Wys. zewn. H</label><input type="number" step="0.5" id="newSecBoxH" value="20" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="row"><label>Szer. zewn. B</label><input type="number" step="0.5" id="newSecBoxB" value="12" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="row"><label>Grubość ścianki t</label><input type="number" step="0.1" id="newSecBoxT" value="0.6" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="muted">Grubość jednakowa na wszystkich ściankach.</div>
+    <div id="newSecPreview"></div>`;
+  if(shape==='ibeam') return `<div class="row"><label>Wysokość h</label><input type="number" step="0.5" id="newSecIH" value="20" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="row"><label>Szerokość b</label><input type="number" step="0.5" id="newSecIB" value="12" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="row"><label>Grub. stopki tf</label><input type="number" step="0.1" id="newSecITf" value="1.0" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="row"><label>Grub. środnika tw</label><input type="number" step="0.1" id="newSecITw" value="0.7" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="muted">Przekrój symetryczny (dwuteownik) — stopki jednakowe u góry i u dołu.</div>
+    <div id="newSecPreview"></div>`;
+  if(shape==='tee') return `<div class="row"><label>Wysokość h</label><input type="number" step="0.5" id="newSecTH" value="10" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="row"><label>Szerokość stopki b</label><input type="number" step="0.5" id="newSecTB" value="10" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="row"><label>Grub. stopki tf</label><input type="number" step="0.1" id="newSecTTf" value="1.0" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="row"><label>Grub. środnika tw</label><input type="number" step="0.1" id="newSecTTw" value="1.0" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="checkline"><input type="checkbox" id="newSecTMirror" onchange="updateSecPreview()"> Odwrócony (stopka na dole)</div>
+    <div class="muted">Przekrój niesymetryczny — środek ciężkości bliżej stopki.</div>
+    <div id="newSecPreview"></div>`;
+  if(shape==='angle') return `<div class="row"><label>Dł. ramienia a</label><input type="number" step="0.5" id="newSecAA" value="8" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="row"><label>Grubość t</label><input type="number" step="0.1" id="newSecAT" value="0.8" onchange="updateSecPreview()"><span class="unit">cm</span></div>
+    <div class="checkline"><input type="checkbox" id="newSecAMirror" onchange="updateSecPreview()"> Odwrócony</div>
+    <div class="muted">Kątownik równoramienny — przekrój niesymetryczny, środek ciężkości bliżej naroża.</div>
+    <div id="newSecPreview"></div>`;
+  return '';
+}
+function onNewSecShapeChange(){
+  newSecShapeState=document.getElementById('newSecShape').value;
+  document.getElementById('newSecSubShapeFields').innerHTML = shapeFieldsHtml(newSecShapeState);
+  updateSecPreview();
+}
+function computeShapeGeom(shape){
+  if(shape==='rect'){
+    const b=parseFloat(document.getElementById('newSecB').value)||1, hh=parseFloat(document.getElementById('newSecH').value)||1;
+    const A=b*hh, I=b*Math.pow(hh,3)/12;
+    return {A,I,h:hh,cTop:hh/2,cBot:hh/2,bw:b,extra:{b,hh,drawKind:'rect'}};
+  }
+  if(shape==='circ'){
+    const d=parseFloat(document.getElementById('newSecD').value)||1;
+    const A=Math.PI*d*d/4, I=Math.PI*Math.pow(d,4)/64;
+    return {A,I,h:d,cTop:d/2,cBot:d/2,bw:d,extra:{d,drawKind:'circle'}};
+  }
+  if(shape==='pipe'){
+    const D=Math.max(parseFloat(document.getElementById('newSecPipeD').value)||1, 0.2);
+    const t=Math.max(0.05, Math.min(parseFloat(document.getElementById('newSecPipeT').value)||0.1, D/2-0.05));
+    const Di=D-2*t;
+    const A=Math.PI/4*(D*D-Di*Di), I=Math.PI/64*(Math.pow(D,4)-Math.pow(Di,4));
+    return {A,I,h:D,cTop:D/2,cBot:D/2,bw:D,extra:{D,t,drawKind:'ring'}};
+  }
+  if(shape==='box'){
+    const H=Math.max(parseFloat(document.getElementById('newSecBoxH').value)||1, 0.2);
+    const B=Math.max(parseFloat(document.getElementById('newSecBoxB').value)||1, 0.2);
+    const t=Math.max(0.05, Math.min(parseFloat(document.getElementById('newSecBoxT').value)||0.1, Math.min(H,B)/2-0.05));
+    const Hi=H-2*t, Bi=B-2*t;
+    const A=B*H-Bi*Hi, I=(B*Math.pow(H,3)-Bi*Math.pow(Hi,3))/12;
+    return {A,I,h:H,cTop:H/2,cBot:H/2,bw:B,extra:{B,H,t,drawKind:'tube'}};
+  }
+  if(shape==='ibeam'){
+    const h=Math.max(parseFloat(document.getElementById('newSecIH').value)||1, 0.2);
+    const b=Math.max(parseFloat(document.getElementById('newSecIB').value)||1, 0.2);
+    const tf=Math.max(0.05, Math.min(parseFloat(document.getElementById('newSecITf').value)||0.1, h/2-0.05));
+    const tw=Math.max(0.05, Math.min(parseFloat(document.getElementById('newSecITw').value)||0.1, b-0.05));
+    const A=2*b*tf + tw*(h-2*tf);
+    const I=(b*Math.pow(h,3) - (b-tw)*Math.pow(h-2*tf,3))/12;
+    return {A,I,h,cTop:h/2,cBot:h/2,bw:b,extra:{tf,tw,drawKind:'ibeam'}};
+  }
+  if(shape==='tee'){
+    const h=Math.max(parseFloat(document.getElementById('newSecTH').value)||1, 0.2);
+    const b=Math.max(parseFloat(document.getElementById('newSecTB').value)||1, 0.2);
+    const tf=Math.max(0.05, Math.min(parseFloat(document.getElementById('newSecTTf').value)||0.1, h-0.05));
+    const tw=Math.max(0.05, Math.min(parseFloat(document.getElementById('newSecTTw').value)||0.1, b-0.05));
+    const mirror=document.getElementById('newSecTMirror').checked;
+    const A1=b*tf, y1=h-tf/2;
+    const A2=tw*(h-tf), y2=(h-tf)/2;
+    const A=A1+A2;
+    const ybar=(A1*y1+A2*y2)/A;
+    const I1=b*Math.pow(tf,3)/12 + A1*Math.pow(y1-ybar,2);
+    const I2=tw*Math.pow(h-tf,3)/12 + A2*Math.pow(y2-ybar,2);
+    const I=I1+I2;
+    const cTopRaw=h-ybar, cBotRaw=ybar; // domyślnie: stopka u góry (blisko centroidu)
+    const cTop = mirror? cBotRaw : cTopRaw, cBot = mirror? cTopRaw : cBotRaw;
+    return {A,I,h,cTop,cBot,bw:b,extra:{tf,tw,mirrored:mirror,drawKind:'tee'}};
+  }
+  // kątownik (angle) — parametryczny
+  const a=Math.max(parseFloat(document.getElementById('newSecAA').value)||1, 0.2);
+  const t=Math.max(0.05, Math.min(parseFloat(document.getElementById('newSecAT').value)||0.1, a/2-0.02));
+  const mirror=document.getElementById('newSecAMirror').checked;
+  const A=2*a*t - t*t;
+  const ybar=(t/2)*(a*a + a*t - t*t)/A; // odległość środka ciężkości od naroża ramion
+  const Ivert=t*Math.pow(a,3)/12 + t*a*Math.pow(a/2-ybar,2);
+  const Ihoriz=(a-t)*Math.pow(t,3)/12 + (a-t)*t*Math.pow(t/2-ybar,2);
+  const I=Ivert+Ihoriz;
+  const cBotRaw=ybar, cTopRaw=a-ybar; // domyślnie: ramię poziome u dołu, blisko naroża
+  const cTop = mirror? cBotRaw : cTopRaw, cBot = mirror? cTopRaw : cBotRaw;
+  return {A,I,h:a,cTop,cBot,bw:a,extra:{t,mirrored:mirror,drawKind:'angle'}};
+}
+
+/* =========================================================================
+   Kategoria 3: WŁASNY — wszystkie parametry wprowadzane ręcznie.
+   ========================================================================= */
+function computeCustomGeom(){
+  const A=parseFloat(document.getElementById('newSecA').value)||1;
+  const I=parseFloat(document.getElementById('newSecI').value)||1;
+  const cTop=parseFloat(document.getElementById('newSecEtop').value)||1;
+  const cBot=parseFloat(document.getElementById('newSecEbot').value)||1;
+  return {A,I,h:cTop+cBot,cTop,cBot,bw:Math.max(cTop+cBot,1)*0.6,extra:{drawKind:'custom'}};
+}
+
+/* =========================================================================
+   Formularz dodawania przekroju — dyspozytor kategorii + podgląd + zapis.
+   ========================================================================= */
+function subFieldsHtml(){
+  if(newSecCategoryState==='katalog') return catalogFieldsHtml();
+  if(newSecCategoryState==='ksztalt') return `<div class="row"><label>Kształt</label><select id="newSecShape" onchange="onNewSecShapeChange()">
+      <option value="rect" ${newSecShapeState==='rect'?'selected':''}>Prostokątny</option>
+      <option value="circ" ${newSecShapeState==='circ'?'selected':''}>Okrągły</option>
+      <option value="pipe" ${newSecShapeState==='pipe'?'selected':''}>Rura okrągła</option>
+      <option value="box" ${newSecShapeState==='box'?'selected':''}>Rura prostokątna</option>
+      <option value="ibeam" ${newSecShapeState==='ibeam'?'selected':''}>Dwuteownik (symetryczny)</option>
+      <option value="tee" ${newSecShapeState==='tee'?'selected':''}>Teownik T</option>
+      <option value="angle" ${newSecShapeState==='angle'?'selected':''}>Kątownik równoramienny L</option>
+    </select></div>
+    <div id="newSecSubShapeFields">${shapeFieldsHtml(newSecShapeState)}</div>`;
+  // wlasny
+  return `<div class="row"><label>Pole A</label><input type="number" step="1" id="newSecA" value="80" onchange="updateSecPreview()"><span class="unit">cm²</span></div>
+    <div class="row"><label>Bezwł. I</label><input type="number" step="10" id="newSecI" value="1000" onchange="updateSecPreview()"><span class="unit">cm⁴</span></div>
+    <div class="row-pair">
+      <div class="half"><label>e góra</label><div class="inp-unit"><input type="number" step="1" id="newSecEtop" value="15" onchange="updateSecPreview()"><span class="unit">cm</span></div></div>
+      <div class="half"><label>e dół</label><div class="inp-unit"><input type="number" step="1" id="newSecEbot" value="15" onchange="updateSecPreview()"><span class="unit">cm</span></div></div>
+    </div>
+    <div class="muted">Odległości środka ciężkości od skrajnych włókien — przy przekroju symetrycznym obie równe h/2.</div>
+    <div id="newSecPreview"></div>`;
+}
+function onNewSecCategoryChange(){
+  newSecCategoryState=document.getElementById('newSecCategory').value;
+  document.getElementById('newSecSubFields').innerHTML=subFieldsHtml();
+  refreshSecName();
+  updateSecPreview();
+}
+function computeSecGeom(){
+  if(newSecCategoryState==='katalog') return computeCatalogGeom();
+  if(newSecCategoryState==='ksztalt') return computeShapeGeom(newSecShapeState);
+  return computeCustomGeom();
+}
+/* ---- mały schematyczny SVG: kontur + kreskowana linia środka ciężkości + wymiary e_góra/e_dół ---- */
+function renderSectionSvg(g){
+  const VB_W=210, VB_H=150, padL=14, padR=64, padT=14, padB=14;
+  const areaW=VB_W-padL-padR, areaH=VB_H-padT-padB;
+  const ex=g.extra||{};
+  const drawKind=ex.drawKind||'rect';
+  let mode='rects', rects=null, bw=g.bw||1, H=(g.cTop+g.cBot)||1;
+  if(drawKind==='rect'){ rects=[{x:0,y:0,w:ex.b,h:ex.hh}]; }
+  else if(drawKind==='circle'){ mode='circle'; }
+  else if(drawKind==='ring'){ mode='ring'; }
+  else if(drawKind==='tube'){ mode='tube'; }
+  else if(drawKind==='ibeam'){
+    const tf=ex.tf, tw=ex.tw;
+    rects=[{x:0,y:0,w:bw,h:tf},{x:(bw-tw)/2,y:tf,w:tw,h:H-2*tf},{x:0,y:H-tf,w:bw,h:tf}];
+  } else if(drawKind==='channel'){
+    const tf=ex.tf, tw=ex.tw;
+    rects=[{x:0,y:0,w:tw,h:H},{x:0,y:0,w:bw,h:tf},{x:0,y:H-tf,w:bw,h:tf}];
+  } else if(drawKind==='tee'){
+    const tf=ex.tf, tw=ex.tw;
+    rects = ex.mirrored?
+      [{x:(bw-tw)/2,y:0,w:tw,h:H-tf},{x:0,y:H-tf,w:bw,h:tf}] :
+      [{x:0,y:0,w:bw,h:tf},{x:(bw-tw)/2,y:tf,w:tw,h:H-tf}];
+  } else if(drawKind==='angle'){
+    const t=ex.t;
+    rects = ex.mirrored?
+      [{x:0,y:0,w:t,h:H},{x:0,y:0,w:bw,h:t}] :
+      [{x:0,y:0,w:t,h:H},{x:0,y:H-t,w:bw,h:t}];
+  } else { rects=[{x:0,y:0,w:bw,h:H}]; } // custom: generic box
+  const scale=Math.max(0.1, Math.min(areaW/bw, areaH/H));
+  const dw=bw*scale, dh=H*scale;
+  const x0=padL+(areaW-dw)/2, y0=padT+(areaH-dh)/2;
+  const toX=x=>(x0+x*scale).toFixed(1), toY=y=>(y0+y*scale).toFixed(1);
+  const FILL='var(--accent-soft)', STROKE='var(--accent-dark)';
+  let shapeSvg='';
+  if(mode==='rects'){
+    shapeSvg=rects.map(r=>`<rect x="${toX(r.x)}" y="${toY(r.y)}" width="${(r.w*scale).toFixed(1)}" height="${(r.h*scale).toFixed(1)}" fill="${FILL}" stroke="${STROKE}" stroke-width="1.4"/>`).join('');
+  } else if(mode==='circle'){
+    shapeSvg=`<circle cx="${(x0+dw/2).toFixed(1)}" cy="${(y0+dh/2).toFixed(1)}" r="${(dw/2).toFixed(1)}" fill="${FILL}" stroke="${STROKE}" stroke-width="1.4"/>`;
+  } else if(mode==='ring'){
+    const cx=x0+dw/2, cy=y0+dh/2, rOut=dw/2, t=(ex.t||0)*scale, rIn=Math.max(rOut-t,1);
+    shapeSvg=`<path fill-rule="evenodd" d="M${(cx-rOut).toFixed(1)},${cy.toFixed(1)} a${rOut.toFixed(1)},${rOut.toFixed(1)} 0 1,0 ${(2*rOut).toFixed(1)},0 a${rOut.toFixed(1)},${rOut.toFixed(1)} 0 1,0 ${(-2*rOut).toFixed(1)},0 Z M${(cx-rIn).toFixed(1)},${cy.toFixed(1)} a${rIn.toFixed(1)},${rIn.toFixed(1)} 0 1,1 ${(2*rIn).toFixed(1)},0 a${rIn.toFixed(1)},${rIn.toFixed(1)} 0 1,1 ${(-2*rIn).toFixed(1)},0 Z" fill="${FILL}" stroke="${STROKE}" stroke-width="1.4"/>`;
+  } else if(mode==='tube'){
+    const t=(ex.t||0)*scale;
+    const ix=x0+t, iy=y0+t, iw=Math.max(dw-2*t,1), ih=Math.max(dh-2*t,1);
+    shapeSvg=`<path fill-rule="evenodd" d="M${x0.toFixed(1)},${y0.toFixed(1)} h${dw.toFixed(1)} v${dh.toFixed(1)} h${(-dw).toFixed(1)} Z M${ix.toFixed(1)},${iy.toFixed(1)} h${iw.toFixed(1)} v${ih.toFixed(1)} h${(-iw).toFixed(1)} Z" fill="${FILL}" stroke="${STROKE}" stroke-width="1.4"/>`;
+  }
+  const cyC=(y0+g.cTop*scale);
+  const centroidSvg=`<line x1="${(x0-4).toFixed(1)}" y1="${cyC.toFixed(1)}" x2="${(x0+dw+4).toFixed(1)}" y2="${cyC.toFixed(1)}" stroke="#dc2626" stroke-width="1.2" stroke-dasharray="4,3"/><circle cx="${(x0+dw/2).toFixed(1)}" cy="${cyC.toFixed(1)}" r="2.4" fill="#dc2626"/>`;
+  const labelX=x0+dw+10;
+  const labelSvg=`<line x1="${labelX.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${labelX.toFixed(1)}" y2="${cyC.toFixed(1)}" stroke="#94a3b8" stroke-width="1"/>
+    <line x1="${labelX.toFixed(1)}" y1="${cyC.toFixed(1)}" x2="${labelX.toFixed(1)}" y2="${(y0+dh).toFixed(1)}" stroke="#94a3b8" stroke-width="1"/>
+    <text x="${(labelX+4).toFixed(1)}" y="${((y0+cyC)/2+3).toFixed(1)}" font-size="9.5" fill="#334155">e_g=${fmtSmart(g.cTop)}</text>
+    <text x="${(labelX+4).toFixed(1)}" y="${((cyC+y0+dh)/2+3).toFixed(1)}" font-size="9.5" fill="#334155">e_d=${fmtSmart(g.cBot)}</text>`;
+  return `<svg viewBox="0 0 ${VB_W} ${VB_H}" style="width:100%;max-width:220px;height:auto;display:block;margin:6px auto;">${shapeSvg}${centroidSvg}${labelSvg}</svg>`;
+}
+function updateSecPreview(){
+  const el=document.getElementById('newSecPreview');
+  if(!el) return;
+  try{
+    const g=computeSecGeom();
+    const svg=renderSectionSvg(g);
+    el.innerHTML=`${svg}<div class="muted" style="text-align:center;">A=${fmtSmart(g.A)} cm² &nbsp;·&nbsp; I=${fmtSmart(g.I)} cm⁴ &nbsp;·&nbsp; e_góra=${fmtSmart(g.cTop)} cm &nbsp;·&nbsp; e_dół=${fmtSmart(g.cBot)} cm</div>`;
+  }catch(e){ el.innerHTML=''; }
+}
+function addSecFormHtml(){
+  return `<div class="card" style="margin-top:6px;background:var(--surface);border-color:var(--input-border);">
+    <div class="row"><label>Nazwa</label><input type="text" id="newSecName" value="Nowy przekrój"></div>
+    <div class="row"><label>Rodzaj</label><select id="newSecCategory" onchange="onNewSecCategoryChange()">
+      <option value="katalog" ${newSecCategoryState==='katalog'?'selected':''}>Z katalogu</option>
+      <option value="ksztalt" ${newSecCategoryState==='ksztalt'?'selected':''}>Kształt definiowany</option>
+      <option value="wlasny" ${newSecCategoryState==='wlasny'?'selected':''}>Własny (ręcznie)</option>
+    </select></div>
+    <div id="newSecSubFields">${subFieldsHtml()}</div>
+    <div class="btnrow"><button class="mini on" onclick="addSection()">Dodaj</button><button class="mini" onclick="closeAddSecForm()">Anuluj</button></div>
+  </div>`;
+}
+function addSection(){
+  const name=document.getElementById('newSecName').value||'Przekrój';
+  const g=computeSecGeom();
+  const id=nextSecId++;
+  const shapeTag = newSecCategoryState==='katalog'? ('cat'+newSecCatalogTypeState)
+                 : newSecCategoryState==='ksztalt'? newSecShapeState
+                 : 'custom';
+  sections.push(Object.assign({id,name,shape:shapeTag,A:g.A,I:g.I,h:g.h,cTop:g.cTop,cBot:g.cBot},g.extra));
+  addSecFormOpen=false; renderSidebar(); buildToolbar();
+}
+function removeSection(id){
+  if(elements.some(e=>e.sectionId===id)){ setStatusHint('Nie można usunąć — przekrój jest przypisany do pręta.'); return; }
+  if(sections.length<=1) return;
+  sections=sections.filter(s=>s.id!==id);
+  if(defaultSectionId===id) defaultSectionId=sections[0].id;
+  renderSidebar(); buildToolbar();
+}
+
+/* =========================================================================
+   INIT
+   ========================================================================= */
+function init(){
+  canvas=document.getElementById('cv');
+  ctx=canvas.getContext('2d');
+  buildToolbar();
+  initEvents();
+  fitView();
+  resizeCanvas();
+  setMode('select');
+  renderSidebar();
+  render();
+
+  // On mobile / embedded (iframe) hosts, the container can still be settling its
+  // final size for a moment after first paint (fonts, host chrome, address bar,
+  // safe-area insets) — resize/fit again once things are stable, unless the
+  // person has already started interacting with the view themselves.
+  const resettle = ()=>{
+    if(userAdjustedView) return;
+    resizeCanvas();
+    fitView();
+    render();
+  };
+  requestAnimationFrame(()=>requestAnimationFrame(resettle));
+  setTimeout(resettle, 300);
+  setTimeout(resettle, 900);
+  if(window.visualViewport){
+    window.visualViewport.addEventListener('resize', ()=>{ resizeCanvas(); });
+  }
+}
+window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
