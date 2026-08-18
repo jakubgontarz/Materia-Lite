@@ -1244,7 +1244,7 @@ function drawMomentArc(cx,cy,M,r,color,label,offsetDeg){
 }
 
 function drawLoads(){
-  const FCOLOR='#dc2626', MCOLOR='#d97706', QCOLOR='#0891b2', TCOLOR='#be185d';
+  const FCOLOR='#dc2626', MCOLOR='#dc2626', QCOLOR='#0891b2', TCOLOR='#be185d';
   nodes.forEach(n=>{
     const p=toScreen(n.x,n.y);
     if(n.force){
@@ -1448,7 +1448,7 @@ function drawReactions(){
       ctx.fillText(fmtSmart(Rly)+' kN', tail.x+px*8, tail.y+py*8+3);
     }
     if(!isNegligible(Rm,magReaction)){
-      drawMomentArc(p.x,p.y,Rm,44,RC,fmtSmart(Rm)+' kNm', angDeg+45);
+      drawMomentArc(p.x,p.y,Rm,22,RC,fmtSmart(Rm)+' kNm', angDeg);
     }
   });
 }
@@ -1596,16 +1596,16 @@ function buildToolbar(){
     <div class="tb-group">
       <button class="tb-btn" id="btnNew" title="Nowy model">${ICONS.neu}<span>Nowy</span></button>
       <button class="tb-btn" id="btnExamples" title="Przykłady">${ICONS.book}<span>Przykład</span></button>
-      <button class="tb-btn" id="btnExport" title="Eksportuj JSON">${ICONS.dl}<span>Zapisz</span></button>
       <button class="tb-btn" id="btnImport" title="Importuj JSON">${ICONS.ul}<span>Wczytaj</span></button>
+      <button class="tb-btn" id="btnExport" title="Eksportuj JSON">${ICONS.dl}<span>Zapisz</span></button>
       <button class="tb-btn" id="btnUndo" title="Cofnij (Ctrl+Z)" disabled>${ICONS.undo}<span>Cofnij</span></button>
       <button class="tb-btn" id="btnRedo" title="Ponów (Ctrl+Y)" disabled>${ICONS.redo}<span>Ponów</span></button>
       <button class="tb-btn" id="btnOptions" title="Opcje programu">${ICONS.gear}<span>Opcje</span></button>
       <input type="file" id="fileImport" accept="application/json" style="display:none;">
     </div>
     ${(showSnapToggle||showNewNodesToggle)? `<div class="tb-group">
-      ${showSnapToggle? `<button class="tb-btn ${snapEnabled?'active':''}" id="snapToggleBtn" title="Przyciąganie do siatki (${snapSize} m)">${ICONS.grid}</button>`:''}
-      ${showNewNodesToggle? `<button class="tb-btn ${allowNewNodesInBarMode?'active':''}" id="newNodesToggleBtn" title="Twórz nowe węzły podczas rysowania pręta">${ICONS.node}</button>`:''}
+      ${showSnapToggle? `<button class="tb-btn ${snapEnabled?'active':''}" id="snapToggleBtn" title="Przyciąganie do siatki (${snapSize} m)">${ICONS.grid}<span>Przyciągaj</span></button>`:''}
+      ${showNewNodesToggle? `<button class="tb-btn ${allowNewNodesInBarMode?'active':''}" id="newNodesToggleBtn" title="Twórz nowe węzły podczas rysowania pręta">${ICONS.node}<span>Auto-węzeł</span></button>`:''}
     </div>` : ''}
     <div class="tb-group" style="margin-left:auto;border-right:none;">
       <button class="tb-btn primary" id="btnRun" title="Uruchom obliczenia (Enter)">${ICONS.run}<span>OBLICZ</span></button>
@@ -2346,7 +2346,7 @@ function panelResults(){
   if(!solved){
     return `<div class="panel"><h3>Wyniki</h3><div class="empty-state">Zbuduj model i kliknij <b>OBLICZ</b> w górnym pasku,<br>aby zobaczyć odkształcenia, wykresy M/T/N i naprężenia.</div></div>`;
   }
-  let html = `<div class="panel"><h3>Wyniki <span class="tag">rozwiązano</span></h3>`;
+  let html = `<div class="panel"><h3>Reakcje <span class="tag">rozwiązano</span></h3>`;
   if(solveWarning) html += `<div class="warn">${solveWarning}</div>`;
   html += reactionsTableHtml();
   html += `</div>`;
