@@ -2164,6 +2164,7 @@ function onDown(e){
 function handlePointerDown(px,py){
   hoverNodeId=null; hoverElemId=null;
   if(mode==='select'){
+    setStatusHint(selectModeHint());
     const nid=hitTestNode(px,py);
     if(nid!=null){ selection={nodeIds:[nid],elemIds:[]}; dragNode=nid; renderSidebar(); render(); return; }
     const eid=hitTestElement(px,py);
@@ -2205,7 +2206,9 @@ function performTapAction(tapMode,px,py){
       setStatusHint('Węzeł o tych współrzędnych już istnieje.');
       return;
     }
-    createNode(mp.x,mp.y); renderSidebar(); render();
+    createNode(mp.x,mp.y);
+    setStatusHint('Tryb: Dodaj węzeł — kliknij na płótnie, aby dodać węzeł');
+    renderSidebar(); render();
   } else if(tapMode==='addBar'){
     const nid=hitTestNode(px,py);
     if(nid==null && !allowNewNodesInBarMode){
@@ -2233,6 +2236,7 @@ function performTapAction(tapMode,px,py){
         const createdId = createElement(barStart,useId);
         if(createdId!=null){
           barStart=useId;
+          setStatusHint('Tryb: Dodaj pręt — wybierz węzeł końcowy');
         }
       }
     }
@@ -2288,7 +2292,10 @@ function handlePointerUp(){
   if(dragNode!=null){
     const draggedId = dragNode;
     dragNode=null;
-    checkAndMergeCoincidentNode(draggedId);
+    const mergedTargetId = checkAndMergeCoincidentNode(draggedId);
+    if(!mergedTargetId){
+      setStatusHint(selectModeHint());
+    }
     renderSidebar(); render();
   }
   if(boxSelectState){
