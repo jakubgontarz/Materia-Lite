@@ -1227,37 +1227,69 @@ function drawSupports(){
     ctx.lineWidth=1.6; ctx.strokeStyle=getCss('--ink'); ctx.fillStyle=getCss('--surface-2');
     const ux=dirType(sp.ux), uy=dirType(sp.uy), rz=dirType(sp.rz);
     const S=13; // symbol size px
-    if(ux==='fixed' && uy==='fixed' && rz==='fixed'){
+    if (ux!=='free' && uy!=='free' && rz!=='free'){
       // full fixation -> wall hatch
       ctx.beginPath(); ctx.moveTo(-S,0); ctx.lineTo(S,0); ctx.stroke();
       for(let i=-S;i<=S;i+=5){ ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i-5,10); ctx.stroke(); }
     } else if(ux!=='free' && uy!=='free' && rz==='free'){
       // pin (triangle)
       drawTriangleDown(S);
-      ctx.beginPath(); ctx.moveTo(-S,S+3); ctx.lineTo(S,S+3); ctx.stroke();
-      hatch(-S,S+3,S,S+3);
+      hatch(-S+3, S, S+3, S);
     } else if(uy!=='free' && ux==='free' && rz==='free'){
       // horizontal roller (restrains vertical)
       drawTriangleDown(S);
-      ctx.beginPath(); ctx.arc(-S+4,S+7,3,0,7); ctx.stroke();
-      ctx.beginPath(); ctx.arc(0,S+7,3,0,7); ctx.stroke();
-      ctx.beginPath(); ctx.arc(S-4,S+7,3,0,7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(-S+4,S+4,3,0,7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0,S+4,3,0,7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(S-4,S+4,3,0,7); ctx.stroke();
     } else if(ux!=='free' && uy==='free' && rz==='free'){
       // vertical roller (restrains horizontal) - rotate triangle 90deg extra
       ctx.save(); ctx.rotate(Math.PI/2);
       drawTriangleDown(S);
-      ctx.beginPath(); ctx.arc(-S+4,S+7,3,0,7); ctx.stroke();
-      ctx.beginPath(); ctx.arc(0,S+7,3,0,7); ctx.stroke();
-      ctx.beginPath(); ctx.arc(S-4,S+7,3,0,7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(-S+4,S+4,3,0,7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0,S+4,3,0,7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(S-4,S+4,3,0,7); ctx.stroke();
       ctx.restore();
-    } else {
+    } else if(ux!=='free' && uy==='free' && rz!=='free'){
+      // Łyżwa pionowa (zablokowany przesuw poziomy Ux i obrót Rz, wolny przesuw Uy)
+      const d = 4, H = 13;
+      ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, 7); ctx.fillStyle = getCss('--ink'); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-d, -H); ctx.lineTo(-d, H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(d, -H); ctx.lineTo(d, H); ctx.stroke();
+      for(let y = -H; y <= H; y += 6){
+        ctx.beginPath(); ctx.moveTo(-d, y); ctx.lineTo(-d - 6, y + 6); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(d, y); ctx.lineTo(d + 6, y - 6); ctx.stroke();
+      }
+    } else if(ux==='free' && uy!=='free' && rz!=='free'){
+      // Łyżwa pozioma (zablokowany przesuw pionowy Uy i obrót Rz, wolny przesuw Ux)
+      const H = 13;
+      ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, 7); ctx.fillStyle = getCss('--ink'); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(-H, 3); ctx.lineTo(H, 3); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(-H, 8); ctx.lineTo(H, 8); ctx.stroke();
+      for(let x = -H; x <= H; x += 6){
+        ctx.beginPath(); ctx.moveTo(x, 8); ctx.lineTo(x - 6, 14); ctx.stroke();
+      }   
+    } else if(ux==='free' && uy==='free' && rz!=='free'){
+      // Łyżwa dwukierunkowa / tuleja (blokuje tylko obrót Rz)
+      const S = 10;
+      // Przegub w węźle
+      ctx.beginPath(); ctx.arc(0, 0, 3.5, 0, 7); ctx.fillStyle = getCss('--ink'); ctx.fill();
+      
+      // Obydwustronna kwadratowa tuleja
+      ctx.beginPath(); ctx.rect(-S, -S, 2*S, 2*S); ctx.stroke();
+      
+      // Rolki po 4 stronach (symbolizujące swobodę przesuwu w X i Y)
+      ctx.beginPath(); ctx.arc(-S-3, 0, 2.5, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(S+3, 0, 2.5, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, -S-3, 2.5, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, S+3, 2.5, 0, 7); ctx.stroke();    
+    } else {        
       // generic custom combination
       drawGenericSupport(sp,S);
     }
     // spring indicators overlay
     if(ux==='spring') drawSpringTick(-S-6,0,false);
     if(uy==='spring') drawSpringTick(0,S+3,true);
-    if(rz==='spring'){ ctx.beginPath(); ctx.arc(0,0,S*0.55,0.3,5.9); ctx.strokeStyle='#7c3aed'; ctx.lineWidth=1.6; ctx.stroke(); }
+    if(rz==='spring') drawRotationalSpring(0, 0, S * 1.2);
     ctx.restore();
   });
 }
@@ -1276,6 +1308,31 @@ function drawSpringTick(x,y,vertical){
   else { ctx.moveTo(0,0); for(let i=0;i<5;i++){ ctx.lineTo(-4-i*4,(i%2?4:-4)); } }
   ctx.stroke(); ctx.restore();
 }
+
+function drawRotationalSpring(x, y, rMax) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.strokeStyle = '#7c3aed';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  
+  const turns = 2.5;                  // Liczba zwojów spirali
+  const maxAngle = turns * 2 * Math.PI;
+  const rMin = 2;                     // Promień wewnętrzny
+  const step = 0.1;
+  
+  for (let a = 0; a <= maxAngle; a += step) {
+    const r = rMin + (rMax - rMin) * (a / maxAngle);
+    const px = r * Math.cos(a);
+    const py = r * Math.sin(a);
+    if (a === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawGenericSupport(sp,S){
   ctx.beginPath(); ctx.rect(-6,-6,12,12); ctx.fillStyle='#e2e8f0'; ctx.fill(); ctx.stroke();
   ctx.font='8px '+FONT_MONO; ctx.fillStyle=getCss('--ink'); ctx.textAlign='center';
