@@ -599,6 +599,7 @@ window.FEM = { solveModel, pointResults };
 const UNIT = { GPa:1e6, cm2:1e-4, cm4:1e-8, cm:1e-2, alphaU:1e-5, deg:Math.PI/180 };
 const FONT_SANS = "'Segoe UI', system-ui, -apple-system, sans-serif";
 const FONT_MONO = "'SF Mono','Cascadia Code','Consolas','Roboto Mono',monospace";
+const DIMCOLOR = '#7c3aed'; // fiolet — używany dla tymczasowych podglądów współrzędnych/wymiarów
 
 let materials = [
   {id:1, name:'Stal konstrukcyjna', E:210, alpha:1.2, density:7850},
@@ -813,6 +814,8 @@ let dragNode=null;           // id of node being dragged
 let panState=null;           // {startX,startY,startOffX,startOffY}
 let mouseModel={x:0,y:0};
 let hoverNodeId=null, hoverElemId=null;
+let lastPlacedNodeId=null;   // id węzła właśnie utworzonego trybem "Dodaj węzeł" — podgląd współrzędnych widoczny do następnej akcji
+let lastDrawnElemId=null;    // id pręta właśnie utworzonego trybem "Dodaj pręt" — linia wymiarowa widoczna do następnej akcji
 let snapEnabled=true, snapSize=0.5;
 let allowNewNodesInBarMode=true;
 let boxSelectEnabled=false;  // toggle (only shown in 'select' mode): when on, dragging empty canvas draws a selection rectangle instead of panning
@@ -1761,6 +1764,7 @@ function render(){
   if(showIdLabels) drawIdLabels();
   if(showReactions) drawReactions();
   if(probe.elId!=null && diagrams) drawProbeMarker();
+  drawTransientOverlays();
   drawScaleBar();
   drawSelectionBox();
 }
@@ -1793,6 +1797,91 @@ function drawIdLabels(){
     ctx.textBaseline='middle';
     ctx.fillText(label, p.x + 7 + padH, p.y - 8);
   });
+}
+
+/* ---- tymczasowe podglądy: współrzędne węzła + linie wymiarowe pręta ----
+   Pokazywane po narysowaniu węzła/pręta (znikają przy kolejnej akcji) oraz
+   na żywo podczas przenoszenia węzła (współrzędne + wymiary wszystkich
+   prętów zbiegających się w tym węźle). ---- */
+function connectedElements(nodeId){
+  return elements.filter(e=>e.n1===nodeId || e.n2===nodeId);
+}
+function drawNodeCoordTip(nodeId){
+  const n=getNode(nodeId); if(!n) return;
+  const p=toScreen(n.x,n.y);
+  const label = `(${fmt(n.x,2)}, ${fmt(n.y,2)})`;
+  ctx.save();
+  ctx.font='11.5px '+FONT_MONO;
+  const w=ctx.measureText(label).width;
+  const padH=6, h=18;
+  const gap=14; // odstęp od węzła, żeby palec na ekranie dotykowym (zwykle poniżej punktu dotyku) go nie zasłaniał
+  const cx=p.x, cy=p.y-gap-h; // wyśrodkowane poziomo, nad węzłem
+  const bx=cx-w/2-padH, by=cy;
+  ctx.fillStyle=DIMCOLOR;
+  roundRect(bx,by,w+2*padH,h,4); ctx.fill();
+  // mały „ogonek” wskazujący w dół, na węzeł
+  ctx.beginPath();
+  ctx.moveTo(cx-5, by+h);
+  ctx.lineTo(cx, by+h+6);
+  ctx.lineTo(cx+5, by+h);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(label, cx, by+h/2);
+  ctx.restore();
+}
+function drawSingleDimension(el){
+  const a=getNode(el.n1), b=getNode(el.n2); if(!a||!b) return;
+  const pa=toScreen(a.x,a.y), pb=toScreen(b.x,b.y);
+  const dx=pb.x-pa.x, dy=pb.y-pa.y;
+  const segLen=Math.hypot(dx,dy)||1;
+  const ux=dx/segLen, uy=dy/segLen;
+  const nx=-uy, ny=ux; // kierunek prostopadły w przestrzeni ekranu
+  const offset=24;
+  const oa={x:pa.x+nx*offset, y:pa.y+ny*offset};
+  const ob={x:pb.x+nx*offset, y:pb.y+ny*offset};
+  ctx.save();
+  ctx.strokeStyle=DIMCOLOR; ctx.fillStyle=DIMCOLOR;
+  // linie pomocnicze od węzłów do linii wymiarowej
+  ctx.lineWidth=1; ctx.setLineDash([2,3]);
+  ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(oa.x,oa.y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pb.x,pb.y); ctx.lineTo(ob.x,ob.y); ctx.stroke();
+  ctx.setLineDash([]);
+  // linia wymiarowa
+  ctx.lineWidth=1.4;
+  ctx.beginPath(); ctx.moveTo(oa.x,oa.y); ctx.lineTo(ob.x,ob.y); ctx.stroke();
+  // kreski końcowe
+  const tick=4;
+  ctx.beginPath(); ctx.moveTo(oa.x-ux*tick,oa.y-uy*tick); ctx.lineTo(oa.x+ux*tick,oa.y+uy*tick); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ob.x-ux*tick,ob.y-uy*tick); ctx.lineTo(ob.x+ux*tick,ob.y+uy*tick); ctx.stroke();
+  // etykieta z długością
+  const midx=(oa.x+ob.x)/2, midy=(oa.y+ob.y)/2;
+  const label = fmt(elLength(el),2)+' m';
+  ctx.font='11px '+FONT_MONO;
+  const w=ctx.measureText(label).width;
+  const padH=5, h=15;
+  ctx.fillStyle=DIMCOLOR;
+  roundRect(midx-w/2-padH, midy-h/2, w+2*padH, h, 4); ctx.fill();
+  ctx.fillStyle='#fff';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(label, midx, midy);
+  ctx.restore();
+}
+function drawElementDimensions(elsArr){ elsArr.forEach(drawSingleDimension); }
+function drawTransientOverlays(){
+  if(dragNode!=null){
+    drawElementDimensions(connectedElements(dragNode));
+    drawNodeCoordTip(dragNode);
+    return;
+  }
+  if(lastDrawnElemId!=null){
+    const el=getElement(lastDrawnElemId);
+    if(el) drawElementDimensions([el]); else lastDrawnElemId=null;
+  }
+  if(lastPlacedNodeId!=null){
+    const n=getNode(lastPlacedNodeId);
+    if(n) drawNodeCoordTip(lastPlacedNodeId); else lastPlacedNodeId=null;
+  }
 }
 
 function niceScaleValue(maxPx,pxPerMeter){
@@ -1991,6 +2080,8 @@ function selectModeHint(){
 }
 function setMode(m){
   mode=m; barStart=null; clearSelection(); boxSelectState=null;
+  // zmiana narzędzia chowa podgląd współrzędnych/wymiarów z poprzedniej akcji
+  lastPlacedNodeId=null; lastDrawnElemId=null;
   const hints={select:selectModeHint(),
     addNode:'Tryb: Dodaj węzeł — kliknij na płótnie, aby dodać węzeł',
     addBar:'Tryb: Dodaj pręt — kliknij węzeł początkowy, potem końcowy (klik w puste miejsce tworzy nowy węzeł)',
@@ -2122,7 +2213,7 @@ function loadExample(key){
   }
   fitView(); clearSelection(); renderSidebar(); render();
 }
-function newModelSilent(){ nodes=[]; elements=[]; nextNodeId=1; nextElemId=1; invalidateResults(); }
+function newModelSilent(){ nodes=[]; elements=[]; nextNodeId=1; nextElemId=1; lastPlacedNodeId=null; lastDrawnElemId=null; invalidateResults(); }
 
 /* =========================================================================
    EXPORT / IMPORT
@@ -2163,6 +2254,8 @@ function onDown(e){
 }
 function handlePointerDown(px,py){
   hoverNodeId=null; hoverElemId=null;
+  // każda nowa akcja chowa poprzedni podgląd współrzędnych/wymiarów
+  lastPlacedNodeId=null; lastDrawnElemId=null;
   if(mode==='select'){
     setStatusHint(selectModeHint());
     const nid=hitTestNode(px,py);
@@ -2206,7 +2299,7 @@ function performTapAction(tapMode,px,py){
       setStatusHint('Węzeł o tych współrzędnych już istnieje.');
       return;
     }
-    createNode(mp.x,mp.y);
+    lastPlacedNodeId = createNode(mp.x,mp.y);
     setStatusHint('Tryb: Dodaj węzeł — kliknij na płótnie, aby dodać węzeł');
     renderSidebar(); render();
   } else if(tapMode==='addBar'){
@@ -2236,6 +2329,7 @@ function performTapAction(tapMode,px,py){
         const createdId = createElement(barStart,useId);
         if(createdId!=null){
           barStart=useId;
+          lastDrawnElemId = createdId;
           setStatusHint('Tryb: Dodaj pręt — wybierz węzeł końcowy');
         }
       }
