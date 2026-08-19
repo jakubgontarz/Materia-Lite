@@ -760,7 +760,7 @@ let nextNodeId=1, nextElemId=1;
 let defaultSectionId=1, defaultMaterialId=1;
 
 let mode='select';           // select | addNode | addBar | delete
-let selection={type:null,id:null};
+let selection={nodeIds:[], elemIds:[]};   // multi-selection: arrays of currently selected node/element ids
 let barStart=null;
 let dragNode=null;           // id of node being dragged
 let panState=null;           // {startX,startY,startOffX,startOffY}
@@ -768,6 +768,8 @@ let mouseModel={x:0,y:0};
 let hoverNodeId=null, hoverElemId=null;
 let snapEnabled=true, snapSize=0.5;
 let allowNewNodesInBarMode=true;
+let boxSelectEnabled=false;  // toggle (only shown in 'select' mode): when on, dragging empty canvas draws a selection rectangle instead of panning
+let boxSelectState=null;     // {startX,startY,curX,curY,moved} while a selection-box drag is in progress
 
 /* ---- undo/redo history (model-only snapshots, taken automatically — see checkAndPushHistory) ---- */
 let undoStack=[], redoStack=[], lastSnapshot=null;
@@ -806,6 +808,16 @@ let canvas, ctx, DPR=1;
 function uid(arr){ return arr.length? Math.max(...arr.map(o=>o.id))+1 : 1; }
 function getNode(id){ return nodes.find(n=>n.id===id); }
 function getElement(id){ return elements.find(e=>e.id===id); }
+/* ---- selection helpers (selection = {nodeIds:[...], elemIds:[...]}) ---- */
+function selectedNodes(){ return selection.nodeIds.map(getNode).filter(Boolean); }
+function selectedElements(){ return selection.elemIds.map(getElement).filter(Boolean); }
+function isNodeSelected(id){ return selection.nodeIds.includes(id); }
+function isElementSelected(id){ return selection.elemIds.includes(id); }
+function clearSelection(){ selection={nodeIds:[], elemIds:[]}; }
+function pruneSelection(){
+  selection.nodeIds = selection.nodeIds.filter(id=>getNode(id));
+  selection.elemIds = selection.elemIds.filter(id=>getElement(id));
+}
 function getMaterial(id){ return materials.find(m=>m.id===id); }
 function getSection(id){ return sections.find(s=>s.id===id); }
 function elLength(el){ const a=getNode(el.n1), b=getNode(el.n2); return Math.hypot(b.x-a.x,b.y-a.y); }
@@ -836,15 +848,41 @@ function fallbackCopy(text,done){
   }catch(e){ done(false); }
 }
 
-/* compact "two inputs side by side" row used for value pairs (X/Y, qStart/qEnd, dTtop/dTbottom, F/kąt...) */
+/* compact "two inputs side by side" row used for value pairs (X/Y, qStart/qEnd, dTtop/dTbottom, F/kąt...).
+   val1/val2 may be `undefined` (meaning: differs across a multi-selection) — shown as a blank field
+   with a "różne" (mixed) placeholder instead of a value, same convention as numInputAttrs(). */
 function pairRow(l1,val1,step1,unit1,onchange1,l2,val2,step2,unit2,onchange2){
   return `<div class="row-pair">
-    <div class="half"><label>${l1}</label><div class="inp-unit"><input type="number" step="${step1}" value="${val1}" onchange="${onchange1}"><span class="unit">${unit1}</span></div></div>
-    <div class="half"><label>${l2}</label><div class="inp-unit"><input type="number" step="${step2}" value="${val2}" onchange="${onchange2}"><span class="unit">${unit2}</span></div></div>
+    <div class="half"><label>${l1}</label><div class="inp-unit"><input type="number" step="${step1}" ${numInputAttrs(val1)} onchange="${onchange1}"><span class="unit">${unit1}</span></div></div>
+    <div class="half"><label>${l2}</label><div class="inp-unit"><input type="number" step="${step2}" ${numInputAttrs(val2)} onchange="${onchange2}"><span class="unit">${unit2}</span></div></div>
   </div>`;
 }
-function angleNudgeButtons(fnName,id){
-  return `<button class="mini nudgebtn" onclick="${fnName}(${id},45)">+45°</button><button class="mini nudgebtn" onclick="${fnName}(${id},-45)">−45°</button>`;
+/* angle nudge (+45/-45) buttons; fnName is expected to read the current selection itself
+   (all editing handlers below operate on selectedNodes()/selectedElements(), not baked-in ids —
+   this is what lets the exact same markup/handlers serve both a single item and a bulk selection). */
+function angleNudgeButtons(fnName){
+  return `<button class="mini nudgebtn" onclick="${fnName}(45)">+45°</button><button class="mini nudgebtn" onclick="${fnName}(-45)">−45°</button>`;
+}
+
+/* ---- bulk-editing helpers: compute a value that's common across a multi-selection, or
+   `undefined` if it differs (rendered as a blank/mixed field the user can still type into —
+   doing so applies the new value to every selected item). ---- */
+function valsEq(a,b){
+  if(a===b) return true;
+  if(typeof a==='number' && typeof b==='number') return Math.abs(a-b)<1e-9;
+  return false;
+}
+function commonVal(items,getter){
+  if(!items.length) return undefined;
+  const v0=getter(items[0]);
+  for(let i=1;i<items.length;i++){ if(!valsEq(getter(items[i]),v0)) return undefined; }
+  return v0;
+}
+function numInputAttrs(val){ return (val===undefined)? `value="" placeholder="różne"` : `value="${val}"`; }
+function selectMixedOption(isMixed){ return isMixed? '<option value="" selected disabled hidden>— różne —</option>' : ''; }
+function triStateCheckAttrs(states){
+  const all=states.every(Boolean), none=states.every(v=>!v);
+  return all? 'checked' : (none? '' : 'data-indeterminate="true"');
 }
 
 function invalidateResults(){
@@ -1024,12 +1062,10 @@ function createElement(n1,n2){
 function deleteNode(id){
   elements = elements.filter(e=>e.n1!==id && e.n2!==id);
   nodes = nodes.filter(n=>n.id!==id);
-  if(selection.type==='node' && selection.id===id) selection={type:null,id:null};
   invalidateResults();
 }
 function deleteElement(id){
   elements = elements.filter(e=>e.id!==id);
-  if(selection.type==='element' && selection.id===id) selection={type:null,id:null};
   invalidateResults();
 }
 
@@ -1081,7 +1117,7 @@ function drawElements(){
   elements.forEach(el=>{
     const a=getNode(el.n1), b=getNode(el.n2);
     const pa=toScreen(a.x,a.y), pb=toScreen(b.x,b.y);
-    const isSel = selection.type==='element'&&selection.id===el.id;
+    const isSel = isElementSelected(el.id);
     const isHov = hoverElemId===el.id;
     ctx.lineWidth = isSel?4.5:(isHov?4:3);
     ctx.strokeStyle = isSel? getCss('--accent-dark') : (isHov? getCss('--accent') : getCss('--ink'));
@@ -1093,8 +1129,9 @@ function drawElements(){
     const off=14/view.scale;
     if(el.hingeStart){ const p=elemBasePoint(a,ux,uy, off); drawHinge(toScreen(p.x,p.y)); }
     if(el.hingeEnd){ const p=elemBasePoint(a,ux,uy, L-off); drawHinge(toScreen(p.x,p.y)); }
-    if(isSel){
-      // local "top"(+y) indicator
+    if(isSel && selection.elemIds.length===1){
+      // local "top"(+y) indicator — only drawn for a single-element selection to avoid
+      // cluttering the drawing with one dashed marker per bar during a bulk selection
       const midx=(a.x+b.x)/2, midy=(a.y+b.y)/2;
       const nx=-uy, ny=ux;
       const p0=toScreen(midx,midy), p1=toScreen(midx+nx*0.6, midy+ny*0.6);
@@ -1113,7 +1150,7 @@ function drawHinge(p){
 function drawNodes(){
   nodes.forEach(n=>{
     const p=toScreen(n.x,n.y);
-    const isSel = selection.type==='node'&&selection.id===n.id;
+    const isSel = isNodeSelected(n.id);
     const isHov = hoverNodeId===n.id;
     const isBarStart = mode==='addBar' && barStart===n.id;
     if(isBarStart){
@@ -1454,6 +1491,24 @@ function drawReactions(){
 }
 
 
+/* ---- rubber-band selection box overlay ---- */
+function drawSelectionBox(){
+  if(!boxSelectState || !boxSelectState.moved) return;
+  const x0=Math.min(boxSelectState.startX,boxSelectState.curX), x1=Math.max(boxSelectState.startX,boxSelectState.curX);
+  const y0=Math.min(boxSelectState.startY,boxSelectState.curY), y1=Math.max(boxSelectState.startY,boxSelectState.curY);
+  const isWindow = boxSelectState.curX >= boxSelectState.startX;
+  ctx.save();
+  ctx.lineWidth=1.3;
+  ctx.strokeStyle = getCss(isWindow? '--accent' : '--ok');
+  ctx.setLineDash(isWindow? [] : [5,4]);
+  ctx.globalAlpha=0.10;
+  ctx.fillStyle = getCss(isWindow? '--accent' : '--ok');
+  ctx.fillRect(x0,y0,x1-x0,y1-y0);
+  ctx.globalAlpha=1;
+  ctx.strokeRect(x0+0.5,y0+0.5,x1-x0,y1-y0);
+  ctx.restore();
+}
+
 /* =========================================================================
    MAIN RENDER
    ========================================================================= */
@@ -1478,6 +1533,7 @@ function render(){
   if(showReactions) drawReactions();
   if(probe.elId!=null && diagrams) drawProbeMarker();
   drawScaleBar();
+  drawSelectionBox();
 }
 
 function drawIdLabels(){
@@ -1555,6 +1611,34 @@ function projectOnElement(elId,px,py){
   return Math.max(0,Math.min(1,t));
 }
 
+/* ---- box (rubber-band) selection: AutoCAD-style window (L->R, full containment)
+   vs crossing (R->L, any overlap) selection, tested in screen space ---- */
+function rectContainsPoint(rect,p){ return p.x>=rect.x0 && p.x<=rect.x1 && p.y>=rect.y0 && p.y<=rect.y1; }
+function ccw3(a,b,c){ return (c.y-a.y)*(b.x-a.x) - (b.y-a.y)*(c.x-a.x); }
+function segSegIntersect(p1,p2,p3,p4){
+  const d1=ccw3(p3,p4,p1), d2=ccw3(p3,p4,p2), d3=ccw3(p1,p2,p3), d4=ccw3(p1,p2,p4);
+  if(((d1>0&&d2<0)||(d1<0&&d2>0)) && ((d3>0&&d4<0)||(d3<0&&d4>0))) return true;
+  return false;
+}
+function segIntersectsRect(pa,pb,rect){
+  if(rectContainsPoint(rect,pa) || rectContainsPoint(rect,pb)) return true;
+  const c1={x:rect.x0,y:rect.y0}, c2={x:rect.x1,y:rect.y0}, c3={x:rect.x1,y:rect.y1}, c4={x:rect.x0,y:rect.y1};
+  return segSegIntersect(pa,pb,c1,c2) || segSegIntersect(pa,pb,c2,c3) || segSegIntersect(pa,pb,c3,c4) || segSegIntersect(pa,pb,c4,c1);
+}
+function applyBoxSelection(x0,y0,x1,y1,isWindow){
+  const rect={x0,y0,x1,y1};
+  const nodeIds=[];
+  nodes.forEach(n=>{ if(rectContainsPoint(rect, toScreen(n.x,n.y))) nodeIds.push(n.id); });
+  const elemIds=[];
+  elements.forEach(el=>{
+    const a=getNode(el.n1), b=getNode(el.n2);
+    const pa=toScreen(a.x,a.y), pb=toScreen(b.x,b.y);
+    if(isWindow){ if(rectContainsPoint(rect,pa) && rectContainsPoint(rect,pb)) elemIds.push(el.id); }
+    else { if(segIntersectsRect(pa,pb,rect)) elemIds.push(el.id); }
+  });
+  selection = {nodeIds, elemIds};
+}
+
 /* =========================================================================
    TOOLBAR
    ========================================================================= */
@@ -1573,6 +1657,7 @@ const ICONS = {
   grid:'<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z M4 9.33h16 M4 14.67h16 M9.33 4v16 M14.67 4v16"/></svg>',
   gear:'<svg viewBox="0 0 24 24"><path d="M3 6h9M17 6h4M3 12h3M9 12h12M3 18h11M19 18h2"/><circle cx="13" cy="6" r="2"/><circle cx="6" cy="12" r="2"/><circle cx="15" cy="18" r="2"/></svg>',
   book:'<svg viewBox="0 0 24 24"><path d="M4 5c3-1.5 6-1.5 8 0v14c-2-1.5-5-1.5-8 0zM20 5c-3-1.5-6-1.5-8 0v14c2-1.5 5-1.5 8 0z"/></svg>',
+  boxselect:'<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1.5" stroke-dasharray="3 2.2"/></svg>',
 };
 function svgStroke(html){ return html; }
 
@@ -1580,6 +1665,7 @@ function buildToolbar(){
   const tb=document.getElementById('toolbar');
   const showSnapToggle = (mode==='addNode' || mode==='addBar');
   const showNewNodesToggle = (mode==='addBar');
+  const showBoxSelectToggle = (mode==='select');
   tb.innerHTML = `
     <div class="tb-group">
       <button class="tb-btn" data-mode="select" title="Zaznacz / przesuń (V)">${ICONS.select}<span>Zaznacz</span></button>
@@ -1603,9 +1689,10 @@ function buildToolbar(){
       <button class="tb-btn" id="btnOptions" title="Opcje programu">${ICONS.gear}<span>Opcje</span></button>
       <input type="file" id="fileImport" accept="application/json" style="display:none;">
     </div>
-    ${(showSnapToggle||showNewNodesToggle)? `<div class="tb-group">
+    ${(showSnapToggle||showNewNodesToggle||showBoxSelectToggle)? `<div class="tb-group">
       ${showSnapToggle? `<button class="tb-btn ${snapEnabled?'active':''}" id="snapToggleBtn" title="Przyciąganie do siatki (${snapSize} m)">${ICONS.grid}<span>Przyciągaj</span></button>`:''}
       ${showNewNodesToggle? `<button class="tb-btn ${allowNewNodesInBarMode?'active':''}" id="newNodesToggleBtn" title="Twórz nowe węzły podczas rysowania pręta">${ICONS.node}<span>Auto-węzeł</span></button>`:''}
+      ${showBoxSelectToggle? `<button class="tb-btn ${boxSelectEnabled?'active':''}" id="boxSelectToggleBtn" title="Zaznaczanie ramką — gdy włączone, przeciągnięcie po pustym miejscu rysuje ramkę zaznaczenia zamiast przewijać widok">${ICONS.boxselect}<span>Ramka</span></button>`:''}
     </div>` : ''}
     <div class="tb-group" style="margin-left:auto;border-right:none;">
       <button class="tb-btn primary" id="btnRun" title="Uruchom obliczenia (Enter)">${ICONS.run}<span>OBLICZ</span></button>
@@ -1625,6 +1712,7 @@ function buildToolbar(){
   document.getElementById('btnOptions').addEventListener('click', openOptionsModal);
   if(showSnapToggle) document.getElementById('snapToggleBtn').addEventListener('click', ()=>{ snapEnabled=!snapEnabled; buildToolbar(); });
   if(showNewNodesToggle) document.getElementById('newNodesToggleBtn').addEventListener('click', ()=>{ allowNewNodesInBarMode=!allowNewNodesInBarMode; buildToolbar(); });
+  if(showBoxSelectToggle) document.getElementById('boxSelectToggleBtn').addEventListener('click', ()=>{ boxSelectEnabled=!boxSelectEnabled; boxSelectState=null; buildToolbar(); setStatusHint(selectModeHint()); render(); });
   refreshDefaultSelectors();
   updateToolbarActive();
   updateUndoRedoButtons();
@@ -1641,9 +1729,14 @@ function refreshDefaultSelectors(){
 function updateToolbarActive(){
   document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active', b.dataset.mode===mode));
 }
+function selectModeHint(){
+  return boxSelectEnabled
+    ? 'Tryb: Zaznacz — ramka WŁ.: przeciągnij po pustym miejscu, aby zaznaczyć ramką (w prawo = okno — tylko w pełni zawarte, w lewo = przecięcie — także dotknięte); kliknij węzeł/pręt, aby zaznaczyć pojedynczo'
+    : 'Tryb: Zaznacz — kliknij węzeł/pręt, przeciągnij aby przesunąć lub przewinąć widok';
+}
 function setMode(m){
-  mode=m; barStart=null; selection={type:null,id:null};
-  const hints={select:'Tryb: Zaznacz — kliknij węzeł/pręt, przeciągnij aby przesunąć lub przewinąć widok',
+  mode=m; barStart=null; clearSelection(); boxSelectState=null;
+  const hints={select:selectModeHint(),
     addNode:'Tryb: Dodaj węzeł — kliknij na płótnie, aby dodać węzeł',
     addBar:'Tryb: Dodaj pręt — kliknij węzeł początkowy, potem końcowy (klik w puste miejsce tworzy nowy węzeł)',
     delete:'Tryb: Usuń — kliknij węzeł lub pręt, aby go usunąć'};
@@ -1717,7 +1810,7 @@ function closeOptionsModal(){ const o=document.getElementById('optionsOverlay');
 
 function newModel(){
   nodes=[]; elements=[]; nextNodeId=1; nextElemId=1;
-  selection={type:null,id:null}; invalidateResults();
+  clearSelection(); invalidateResults();
   fitView(); setMode('select'); renderSidebar(); render();
 }
 
@@ -1772,7 +1865,7 @@ function loadExample(key){
     getElement(e1).hingeEnd=true; getElement(e2).hingeStart=true;
     getElement(e1).q={qStart:8,qEnd:8,angle:270}; getElement(e2).q={qStart:8,qEnd:8,angle:270};
   }
-  fitView(); selection={type:null,id:null}; renderSidebar(); render();
+  fitView(); clearSelection(); renderSidebar(); render();
 }
 function newModelSilent(){ nodes=[]; elements=[]; nextNodeId=1; nextElemId=1; invalidateResults(); }
 
@@ -1797,7 +1890,7 @@ function importModelFile(e){
       nextNodeId=data.nextNodeId||uid(nodes); nextElemId=data.nextElemId||uid(elements);
       nextMatId=data.nextMatId||uid(materials); nextSecId=data.nextSecId||uid(sections);
       defaultSectionId=data.defaultSectionId||sections[0].id; defaultMaterialId=data.defaultMaterialId||materials[0].id;
-      invalidateResults(); selection={type:null,id:null};
+      invalidateResults(); clearSelection();
       fitView(); buildToolbar(); renderSidebar(); render();
     }catch(err){ setStatusHint('Błąd wczytywania pliku: '+err.message); }
   };
@@ -1816,14 +1909,22 @@ function onDown(e){
 function handlePointerDown(px,py){
   if(mode==='select'){
     const nid=hitTestNode(px,py);
-    if(nid!=null){ selection={type:'node',id:nid}; dragNode=nid; renderSidebar(); render(); return; }
+    if(nid!=null){ selection={nodeIds:[nid],elemIds:[]}; dragNode=nid; renderSidebar(); render(); return; }
     const eid=hitTestElement(px,py);
     if(eid!=null){
-      selection={type:'element',id:eid};
+      selection={nodeIds:[],elemIds:[eid]};
       if(diagrams && diagrams[eid]!=null){ probe.elId=eid; probe.t=projectOnElement(eid,px,py); }
       renderSidebar(); render(); return;
     }
-    selection={type:null,id:null};
+    if(boxSelectEnabled){
+      // empty area + box-select toggle ON: start a rubber-band drag instead of panning.
+      // Whether it ends up being a box-select or just a deselect-tap is decided on pointer-up.
+      clearSelection();
+      boxSelectState={startX:px,startY:py,curX:px,curY:py,moved:false};
+      renderSidebar(); render();
+      return;
+    }
+    clearSelection();
     panState={startX:px,startY:py,startOffX:view.offX,startOffY:view.offY,moved:false};
     renderSidebar(); render();
   } else if(mode==='addNode' || mode==='addBar' || mode==='delete'){
@@ -1869,6 +1970,13 @@ function handlePointerMove(px,py){
     render();
     return;
   }
+  if(boxSelectState){
+    boxSelectState.curX=px; boxSelectState.curY=py;
+    if(!boxSelectState.moved && Math.hypot(px-boxSelectState.startX,py-boxSelectState.startY)>6) boxSelectState.moved=true;
+    canvas.style.cursor='crosshair';
+    render();
+    return;
+  }
   if(panState){
     const dx=px-panState.startX, dy=py-panState.startY;
     if(Math.hypot(dx,dy)>6){ panState.moved=true; userAdjustedView=true; }
@@ -1888,6 +1996,17 @@ function handlePointerMove(px,py){
 function onUp(e){ handlePointerUp(); }
 function handlePointerUp(){
   if(dragNode!=null){ dragNode=null; renderSidebar(); }
+  if(boxSelectState){
+    if(boxSelectState.moved){
+      const x0=Math.min(boxSelectState.startX,boxSelectState.curX), x1=Math.max(boxSelectState.startX,boxSelectState.curX);
+      const y0=Math.min(boxSelectState.startY,boxSelectState.curY), y1=Math.max(boxSelectState.startY,boxSelectState.curY);
+      const isWindow = boxSelectState.curX >= boxSelectState.startX; // left->right = window (full containment), right->left = crossing (any overlap)
+      applyBoxSelection(x0,y0,x1,y1,isWindow);
+    }
+    boxSelectState=null;
+    renderSidebar(); render();
+    return;
+  }
   if(panState && panState.tapMode && !panState.moved){
     performTapAction(panState.tapMode, panState.startX, panState.startY);
   }
@@ -1925,8 +2044,12 @@ function onKey(e){
     setMode('select'); return;
   }
   if(e.key==='Delete'||e.key==='Backspace'){
-    if(selection.type==='node'){ deleteNode(selection.id); renderSidebar(); render(); }
-    else if(selection.type==='element'){ deleteElement(selection.id); renderSidebar(); render(); }
+    if(selection.nodeIds.length || selection.elemIds.length){
+      selection.elemIds.slice().forEach(id=>deleteElement(id));
+      selection.nodeIds.slice().forEach(id=>deleteNode(id));
+      clearSelection();
+      renderSidebar(); render();
+    }
     return;
   }
   if(e.key==='v'||e.key==='V') setMode('select');
@@ -1956,7 +2079,7 @@ function onTouchStart(e){
     const p=touchPt(e.touches[0]);
     handlePointerDown(p.x,p.y);
   } else if(e.touches.length>=2){
-    dragNode=null; panState=null;
+    dragNode=null; panState=null; boxSelectState=null;
     const mid=touchMid(e);
     const before=toModel(mid.x,mid.y);
     touchPinch={ startDist:touchDist(e), startScale:view.scale, anchorModel:before };
@@ -1981,7 +2104,7 @@ function onTouchMove(e){
 function onTouchEnd(e){
   e.preventDefault();
   if(e.touches.length===0){ handlePointerUp(); touchPinch=null; }
-  else if(e.touches.length===1){ touchPinch=null; dragNode=null; panState=null; }
+  else if(e.touches.length===1){ touchPinch=null; dragNode=null; panState=null; boxSelectState=null; }
 }
 
 function initEvents(){
@@ -2011,8 +2134,10 @@ let newSecShapeState='rect';         // dla 'ksztalt': rect|circ|pipe|box|ibeam|
 
 function renderSidebar(){
   checkAndPushHistory();
+  pruneSelection();
   const sb=document.getElementById('sidebar');
   sb.innerHTML = panelSelection() + panelResults() + panelLibrary();
+  sb.querySelectorAll('[data-indeterminate="true"]').forEach(el=>{ el.indeterminate=true; });
 }
 
 /* =========================================================================
@@ -2047,8 +2172,6 @@ function restoreSnapshot(json){
   defaultSectionId=d.defaultSectionId; defaultMaterialId=d.defaultMaterialId;
   invalidateResults();
   lastSnapshot=modelSnapshot(); // sync first, so the renderSidebar() call below doesn't re-trigger history
-  if(selection.type==='node' && !getNode(selection.id)) selection={type:null,id:null};
-  if(selection.type==='element' && !getElement(selection.id)) selection={type:null,id:null};
   splitFormElId=null;
   buildToolbar();
   renderSidebar(); render();
@@ -2072,9 +2195,18 @@ function updateUndoRedoButtons(){
 }
 
 function panelSelection(){
-  if(selection.type==='node' && getNode(selection.id)) return panelNode(getNode(selection.id));
-  if(selection.type==='element' && getElement(selection.id)) return panelElement(getElement(selection.id));
-  return `<div class="panel"><h3>Właściwości</h3><div class="empty-state">Zaznacz węzeł lub pręt na rysunku (tryb „Zaznacz”),<br>aby edytować jego właściwości: podpory, obciążenia, przekrój i materiał.</div></div>`;
+  const nSel=selectedNodes(), eSel=selectedElements();
+  if(nSel.length===0 && eSel.length===0){
+    const boxHint = boxSelectEnabled? '<br><br>Ramka zaznaczania jest włączona — przeciągnij po pustym miejscu, aby zaznaczyć kilka węzłów/prętów naraz.' : '';
+    return `<div class="panel"><h3>Właściwości</h3><div class="empty-state">Zaznacz węzeł lub pręt na rysunku (tryb „Zaznacz”),<br>aby edytować jego właściwości: podpory, obciążenia, przekrój i materiał.${boxHint}</div></div>`;
+  }
+  let html='';
+  if(nSel.length && eSel.length){
+    html += `<div class="panel"><div class="muted">Zaznaczono: ${nSel.length} ${nSel.length===1?'węzeł':'węzły/węzłów'}, ${eSel.length} ${eSel.length===1?'pręt':'pręty/prętów'}. Edycje poniżej dotyczą wszystkich zaznaczonych węzłów lub, odpowiednio, prętów.</div></div>`;
+  }
+  if(nSel.length) html += panelNode(nSel);
+  if(eSel.length) html += panelElement(eSel);
+  return html;
 }
 
 function presetMatches(n,key){
@@ -2087,128 +2219,178 @@ function presetMatches(n,key){
   if(key==='rollerV') return t(sp.ux)==='fixed'&&t(sp.uy)==='free'&&t(sp.rz)==='free';
   return false;
 }
-function dirBlock(nodeId,key,label,dir,isRot){
-  const t=dir?dir.type:'free';
+/* nodesArr: one or more selected node objects. type/k/delta each fall back to a
+   "— różne —" placeholder in the dropdown / a blank+"różne" number field when the
+   selected nodes disagree, exactly like the numeric bulk fields elsewhere in this panel. */
+function dirBlock(nodesArr,key,label,isRot){
+  const commonType = commonVal(nodesArr, n=> n.support? dirType(n.support[key]) : 'free');
   let html=`<div class="row"><label>${label}</label>
-    <select onchange="updateSupportDir(${nodeId},'${key}','type',this.value)">
-      <option value="free" ${t==='free'?'selected':''}>Swobodny</option>
-      <option value="fixed" ${t==='fixed'?'selected':''}>Sztywny</option>
-      <option value="spring" ${t==='spring'?'selected':''}>Sprężysty</option>
+    <select onchange="bulkUpdateSupportDir('${key}','type',this.value)">
+      ${selectMixedOption(commonType===undefined)}
+      <option value="free" ${commonType==='free'?'selected':''}>Swobodny</option>
+      <option value="fixed" ${commonType==='fixed'?'selected':''}>Sztywny</option>
+      <option value="spring" ${commonType==='spring'?'selected':''}>Sprężysty</option>
     </select></div>`;
-  if(t==='spring') html+=`<div class="row"><label></label><input type="number" step="50" value="${dir.k||0}" onchange="updateSupportDir(${nodeId},'${key}','k',this.value)"><span class="unit">${isRot?'kNm/rad':'kN/m'}</span></div>`;
-  if(t!=='free') html+=`<div class="row"><label>${t==='spring'?'Wymuszenie':'Osiadanie'}</label><input type="number" step="0.5" value="${dir.delta||0}" onchange="updateSupportDir(${nodeId},'${key}','delta',this.value)"><span class="unit">${isRot?'°':'cm'}</span></div>`;
+  if(commonType==='spring'){
+    const kVal=commonVal(nodesArr, n=> (n.support&&n.support[key])? (n.support[key].k||0):0);
+    html+=`<div class="row"><label></label><input type="number" step="50" ${numInputAttrs(kVal)} onchange="bulkUpdateSupportDir('${key}','k',this.value)"><span class="unit">${isRot?'kNm/rad':'kN/m'}</span></div>`;
+  }
+  if(commonType && commonType!=='free'){
+    const dVal=commonVal(nodesArr, n=> (n.support&&n.support[key])? (n.support[key].delta||0):0);
+    html+=`<div class="row"><label>${commonType==='spring'?'Wymuszenie':'Osiadanie'}</label><input type="number" step="0.5" ${numInputAttrs(dVal)} onchange="bulkUpdateSupportDir('${key}','delta',this.value)"><span class="unit">${isRot?'°':'cm'}</span></div>`;
+  }
   return html;
 }
-function panelNode(n){
+function panelNode(nodesArr){
+  const multi = nodesArr.length>1;
+  const header = multi? `Węzły (${nodesArr.length}): ${nodesArr.map(n=>'W'+n.id).join(', ')}` : `Węzeł W${nodesArr[0].id}`;
+  const forceStates = nodesArr.map(n=>!!n.force), noneForce = forceStates.every(v=>!v);
+  const fVal = commonVal(nodesArr, n=> n.force? n.force.F : undefined);
+  const aVal = commonVal(nodesArr, n=> n.force? n.force.angle : undefined);
+  const momentStates = nodesArr.map(n=>!!n.moment), noneMoment = momentStates.every(v=>!v);
+  const mVal = commonVal(nodesArr, n=> n.moment? n.moment.M : undefined);
   let html = `<div class="panel">
-    <h3>Węzeł W${n.id}</h3>
-    ${pairRow('X',n.x,'0.1','m',`updateNodeCoord(${n.id},'x',this.value)`,'Y',n.y,'0.1','m',`updateNodeCoord(${n.id},'y',this.value)`)}
-    <div class="btnrow"><button class="mini danger" onclick="deleteNode(${n.id});renderSidebar();render();">Usuń węzeł</button></div>
+    <h3>${header}</h3>
+    ${!multi? pairRow('X',nodesArr[0].x,'0.1','m',`updateNodeCoordSel('x',this.value)`,'Y',nodesArr[0].y,'0.1','m',`updateNodeCoordSel('y',this.value)`) : '<div class="muted">Aby edytować współrzędne X/Y, zaznacz pojedynczy węzeł.</div>'}
+    <div class="btnrow"><button class="mini danger" onclick="deleteSelectedNodes()">Usuń ${multi?'zaznaczone węzły':'węzeł'}</button></div>
   </div>
   <div class="panel">
     <h3>Podpora</h3>
     <div class="btnrow">
-      <button class="mini ${presetMatches(n,'none')?'on':''}" onclick="applySupportPreset(${n.id},'none')">Brak</button>
-      <button class="mini ${presetMatches(n,'fixed')?'on':''}" onclick="applySupportPreset(${n.id},'fixed')">Utwierdzenie</button>
-      <button class="mini ${presetMatches(n,'pin')?'on':''}" onclick="applySupportPreset(${n.id},'pin')">Przegubowa stała</button>
-      <button class="mini ${presetMatches(n,'rollerH')?'on':''}" onclick="applySupportPreset(${n.id},'rollerH')">Przesuwna pozioma</button>
-      <button class="mini ${presetMatches(n,'rollerV')?'on':''}" onclick="applySupportPreset(${n.id},'rollerV')">Przesuwna pionowa</button>
+      <button class="mini ${nodesArr.every(n=>presetMatches(n,'none'))?'on':''}" onclick="bulkApplySupportPreset('none')">Brak</button>
+      <button class="mini ${nodesArr.every(n=>presetMatches(n,'fixed'))?'on':''}" onclick="bulkApplySupportPreset('fixed')">Utwierdzenie</button>
+      <button class="mini ${nodesArr.every(n=>presetMatches(n,'pin'))?'on':''}" onclick="bulkApplySupportPreset('pin')">Przegubowa stała</button>
+      <button class="mini ${nodesArr.every(n=>presetMatches(n,'rollerH'))?'on':''}" onclick="bulkApplySupportPreset('rollerH')">Przesuwna pozioma</button>
+      <button class="mini ${nodesArr.every(n=>presetMatches(n,'rollerV'))?'on':''}" onclick="bulkApplySupportPreset('rollerV')">Przesuwna pionowa</button>
     </div>
-    ${n.support? `<hr class="sep">
-      <div class="row"><label>Kąt podpory</label><input type="number" step="5" value="${n.support.angleDeg||0}" onchange="updateSupportAngle(${n.id},this.value)"><span class="unit">°</span></div>
-      <div class="btnrow" style="margin-top:-2px;">${angleNudgeButtons('nudgeSupportAngle',n.id)}</div>
-      <div class="muted" style="margin:6px 0;">Obraca lokalne kierunki H/V podpory względem osi globalnych (np. podpora na skarpie).</div>
-      ${dirBlock(n.id,'ux','Poziomy (H)',n.support.ux,false)}
-      ${dirBlock(n.id,'uy','Pionowy (V)',n.support.uy,false)}
-      ${dirBlock(n.id,'rz','Obrót (M)',n.support.rz,true)}
-    ` : '<div class="muted">Węzeł bez podpory.</div>'}
+    <hr class="sep">
+    <div class="row"><label>Kąt podpory</label><input type="number" step="5" ${numInputAttrs(commonVal(nodesArr,n=>n.support?(n.support.angleDeg||0):0))} onchange="bulkUpdateSupportAngle(this.value)"><span class="unit">°</span></div>
+    <div class="btnrow" style="margin-top:-2px;">${angleNudgeButtons('bulkNudgeSupportAngle')}</div>
+    <div class="muted" style="margin:6px 0;">Obraca lokalne kierunki H/V podpory względem osi globalnych (np. podpora na skarpie).</div>
+    ${dirBlock(nodesArr,'ux','Poziomy (H)',false)}
+    ${dirBlock(nodesArr,'uy','Pionowy (V)',false)}
+    ${dirBlock(nodesArr,'rz','Obrót (M)',true)}
   </div>
   <div class="panel">
-    <h3>Siła skupiona <input type="checkbox" ${n.force?'checked':''} onchange="toggleNodeForce(${n.id},this.checked)"></h3>
-    ${n.force? `
-      ${pairRow('Wartość',n.force.F,'0.5','kN',`updateNodeForce(${n.id},'F',this.value)`,'Kąt',n.force.angle,'5','°',`updateNodeForce(${n.id},'angle',this.value)`)}
+    <h3>Siła skupiona <input type="checkbox" ${triStateCheckAttrs(forceStates)} onchange="bulkToggleNodeForce(this.checked)"></h3>
+    ${!noneForce? `
+      ${pairRow('Wartość',fVal,'0.5','kN',`bulkUpdateNodeForce('F',this.value)`,'Kąt',aVal,'5','°',`bulkUpdateNodeForce('angle',this.value)`)}
       <div class="btnrow">
-        <button class="mini" onclick="setForceAngle(${n.id},270)">↓ w dół</button>
-        <button class="mini" onclick="setForceAngle(${n.id},90)">↑ w górę</button>
-        <button class="mini" onclick="setForceAngle(${n.id},0)">→ w prawo</button>
-        <button class="mini" onclick="setForceAngle(${n.id},180)">← w lewo</button>
-        ${angleNudgeButtons('nudgeForceAngle',n.id)}
+        <button class="mini" onclick="bulkSetForceAngle(270)">↓ w dół</button>
+        <button class="mini" onclick="bulkSetForceAngle(90)">↑ w górę</button>
+        <button class="mini" onclick="bulkSetForceAngle(0)">→ w prawo</button>
+        <button class="mini" onclick="bulkSetForceAngle(180)">← w lewo</button>
+        ${angleNudgeButtons('bulkNudgeForceAngle')}
       </div>
       <div class="muted">Kąt: 0°=w prawo, 90°=w górę (przeciwnie do zegara).</div>
-    ` : '<div class="muted">Brak siły w tym węźle.</div>'}
+    ` : `<div class="muted">Brak siły w ${multi?'zaznaczonych węzłach':'tym węźle'}.</div>`}
   </div>
   <div class="panel">
-    <h3>Moment skupiony <input type="checkbox" ${n.moment?'checked':''} onchange="toggleNodeMoment(${n.id},this.checked)"></h3>
-    ${n.moment? `
-      <div class="row"><label>Wartość</label><input type="number" step="0.5" value="${n.moment.M}" onchange="updateNodeMoment(${n.id},this.value)"><span class="unit">kNm</span></div>
+    <h3>Moment skupiony <input type="checkbox" ${triStateCheckAttrs(momentStates)} onchange="bulkToggleNodeMoment(this.checked)"></h3>
+    ${!noneMoment? `
+      <div class="row"><label>Wartość</label><input type="number" step="0.5" ${numInputAttrs(mVal)} onchange="bulkUpdateNodeMoment(this.value)"><span class="unit">kNm</span></div>
       <div class="muted">Wartość dodatnia = przeciwnie do ruchu wskazówek zegara.</div>
-    ` : '<div class="muted">Brak momentu w tym węźle.</div>'}
+    ` : `<div class="muted">Brak momentu w ${multi?'zaznaczonych węzłach':'tym węźle'}.</div>`}
   </div>`;
   return html;
 }
 
-function panelElement(el){
-  const L=elLength(el);
-  const a=getNode(el.n1), b=getNode(el.n2);
-  const angDeg = Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI;
-  const qMode = (el.q && el.q.mode) || 'resultant';
-  return `<div class="panel">
-    <h3>Pręt P${el.id} <span class="tag">W${el.n1}→W${el.n2}</span></h3>
-    <div class="muted" style="margin-bottom:8px;">Długość L=${fmt(L,3)} m &nbsp;·&nbsp; kąt nachylenia=${fmt(angDeg,2)}°</div>
-    <div class="btnrow">
-      <button class="mini danger" onclick="deleteElement(${el.id});renderSidebar();render();">Usuń pręt</button>
-      <button class="mini" onclick="copyToClipboard('${fmt(L,3)}','długość P${el.id}')">Kopiuj długość</button>
-      <button class="mini" onclick="copyToClipboard('${fmt(angDeg,2)}','kąt P${el.id}')">Kopiuj kąt</button>
-      <button class="mini" onclick="openSplitForm(${el.id})">Podziel pręt</button>
-    </div>
-    ${splitFormElId===el.id? splitFormHtml(el) : ''}
-  </div>
+function panelElement(elArr){
+  const multi = elArr.length>1;
+  const secCommon = commonVal(elArr, e=>e.sectionId);
+  const matCommon = commonVal(elArr, e=>e.materialId);
+  const hsStates = elArr.map(e=>!!e.hingeStart), heStates = elArr.map(e=>!!e.hingeEnd);
+  const showMomHS = hsStates.some(Boolean), showMomHE = heStates.some(Boolean);
+  const momHSVal = commonVal(elArr, e=> e.hingeStart? (e.momentHingeStart||0) : undefined);
+  const momHEVal = commonVal(elArr, e=> e.hingeEnd? (e.momentHingeEnd||0) : undefined);
+  const qStates = elArr.map(e=>!!e.q), noneQ = qStates.every(v=>!v);
+  const qModeCommon = commonVal(elArr, e=> e.q? (e.q.mode||'resultant') : undefined);
+  const qStartVal = commonVal(elArr, e=> e.q? e.q.qStart : undefined);
+  const qEndVal = commonVal(elArr, e=> e.q? e.q.qEnd : undefined);
+  const qAngleVal = commonVal(elArr, e=> e.q? e.q.angle : undefined);
+  const tStates = elArr.map(e=>!!e.thermal), noneT = tStates.every(v=>!v);
+  const dTopVal = commonVal(elArr, e=> e.thermal? e.thermal.dTtop : undefined);
+  const dBotVal = commonVal(elArr, e=> e.thermal? e.thermal.dTbottom : undefined);
+
+  let topPanel;
+  if(!multi){
+    const el=elArr[0];
+    const L=elLength(el);
+    const a=getNode(el.n1), b=getNode(el.n2);
+    const angDeg = Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI;
+    topPanel = `<div class="panel">
+      <h3>Pręt P${el.id} <span class="tag">W${el.n1}→W${el.n2}</span></h3>
+      <div class="muted" style="margin-bottom:8px;">Długość L=${fmt(L,3)} m &nbsp;·&nbsp; kąt nachylenia=${fmt(angDeg,2)}°</div>
+      <div class="btnrow">
+        <button class="mini danger" onclick="deleteSelectedElements()">Usuń pręt</button>
+        <button class="mini" onclick="copyToClipboard('${fmt(L,3)}','długość P${el.id}')">Kopiuj długość</button>
+        <button class="mini" onclick="copyToClipboard('${fmt(angDeg,2)}','kąt P${el.id}')">Kopiuj kąt</button>
+        <button class="mini" onclick="openSplitForm(${el.id})">Podziel pręt</button>
+      </div>
+      ${splitFormElId===el.id? splitFormHtml(el) : ''}
+    </div>`;
+  } else {
+    topPanel = `<div class="panel">
+      <h3>Pręty (${elArr.length}): ${elArr.map(e=>'P'+e.id).join(', ')}</h3>
+      <div class="btnrow">
+        <button class="mini danger" onclick="deleteSelectedElements()">Usuń zaznaczone pręty</button>
+        <button class="mini" onclick="openSplitForm('__bulk__')">Podziel zaznaczone pręty</button>
+      </div>
+      ${splitFormElId==='__bulk__'? splitFormHtmlBulk(elArr) : ''}
+    </div>`;
+  }
+
+  return topPanel + `
   <div class="panel">
     <h3>Przekrój i materiał</h3>
-    <div class="row"><label>Przekrój</label><select onchange="updateElemField(${el.id},'sectionId',parseInt(this.value))">
-      ${sections.map(s=>`<option value="${s.id}" ${s.id===el.sectionId?'selected':''}>${s.name}</option>`).join('')}
+    <div class="row"><label>Przekrój</label><select onchange="bulkUpdateElemField('sectionId',parseInt(this.value))">
+      ${selectMixedOption(secCommon===undefined)}
+      ${sections.map(s=>`<option value="${s.id}" ${s.id===secCommon?'selected':''}>${s.name}</option>`).join('')}
     </select></div>
-    <div class="row"><label>Materiał</label><select onchange="updateElemField(${el.id},'materialId',parseInt(this.value))">
-      ${materials.map(m=>`<option value="${m.id}" ${m.id===el.materialId?'selected':''}>${m.name}</option>`).join('')}
+    <div class="row"><label>Materiał</label><select onchange="bulkUpdateElemField('materialId',parseInt(this.value))">
+      ${selectMixedOption(matCommon===undefined)}
+      ${materials.map(m=>`<option value="${m.id}" ${m.id===matCommon?'selected':''}>${m.name}</option>`).join('')}
     </select></div>
-    ${sectionAsymNote(getSection(el.sectionId))? `<div class="muted" style="margin-top:6px;">Przekrój niesymetryczny — środek ciężkości: e_góra=${fmtSmart(getSection(el.sectionId).cTop)} cm, e_dół=${fmtSmart(getSection(el.sectionId).cBot)} cm (względem lokalnej osi „góra” — zaznacz pręt, aby zobaczyć jej kierunek na rysunku).</div>` : ''}
+    ${(!multi && sectionAsymNote(getSection(elArr[0].sectionId)))? `<div class="muted" style="margin-top:6px;">Przekrój niesymetryczny — środek ciężkości: e_góra=${fmtSmart(getSection(elArr[0].sectionId).cTop)} cm, e_dół=${fmtSmart(getSection(elArr[0].sectionId).cBot)} cm (względem lokalnej osi „góra” — zaznacz pręt, aby zobaczyć jej kierunek na rysunku).</div>` : ''}
   </div>
   <div class="panel">
     <h3>Przeguby</h3>
-    <div class="checkline"><input type="checkbox" ${el.hingeStart?'checked':''} onchange="updateElemField(${el.id},'hingeStart',this.checked)"> Przegub na początku (przy W${el.n1})</div>
-    ${el.hingeStart? `<div class="row" style="margin:4px 0 10px 22px;"><label>Moment za przegubem</label><input type="number" step="1" value="${el.momentHingeStart||0}" onchange="updateElemField(${el.id},'momentHingeStart',parseFloat(this.value)||0)"><span class="unit">kNm</span></div>` : ''}
-    <div class="checkline"><input type="checkbox" ${el.hingeEnd?'checked':''} onchange="updateElemField(${el.id},'hingeEnd',this.checked)"> Przegub na końcu (przy W${el.n2})</div>
-    ${el.hingeEnd? `<div class="row" style="margin:4px 0 0 22px;"><label>Moment za przegubem</label><input type="number" step="1" value="${el.momentHingeEnd||0}" onchange="updateElemField(${el.id},'momentHingeEnd',parseFloat(this.value)||0)"><span class="unit">kNm</span></div>` : ''}
-    ${(el.hingeStart||el.hingeEnd)? `<div class="muted" style="margin-top:6px;">Moment działający bezpośrednio na pręt, po jego stronie przegubu (niezależnie od obrotu węzła). Dodatni = przeciwnie do ruchu wskazówek zegara.</div>` : ''}
+    <div class="checkline"><input type="checkbox" ${triStateCheckAttrs(hsStates)} onchange="bulkUpdateElemField('hingeStart',this.checked)"> Przegub na początku${multi?'':' (przy W'+elArr[0].n1+')'}</div>
+    ${showMomHS? `<div class="row" style="margin:4px 0 10px 22px;"><label>Moment za przegubem</label><input type="number" step="1" ${numInputAttrs(momHSVal)} onchange="bulkUpdateElemField('momentHingeStart',parseFloat(this.value)||0)"><span class="unit">kNm</span></div>` : ''}
+    <div class="checkline"><input type="checkbox" ${triStateCheckAttrs(heStates)} onchange="bulkUpdateElemField('hingeEnd',this.checked)"> Przegub na końcu${multi?'':' (przy W'+elArr[0].n2+')'}</div>
+    ${showMomHE? `<div class="row" style="margin:4px 0 0 22px;"><label>Moment za przegubem</label><input type="number" step="1" ${numInputAttrs(momHEVal)} onchange="bulkUpdateElemField('momentHingeEnd',parseFloat(this.value)||0)"><span class="unit">kNm</span></div>` : ''}
+    ${(showMomHS||showMomHE)? `<div class="muted" style="margin-top:6px;">Moment działający bezpośrednio na pręt, po jego stronie przegubu (niezależnie od obrotu węzła). Dodatni = przeciwnie do ruchu wskazówek zegara.</div>` : ''}
   </div>
   <div class="panel">
-    <h3>Obciążenie ciągłe <input type="checkbox" ${el.q?'checked':''} onchange="toggleElemQ(${el.id},this.checked)"></h3>
-    ${el.q? `
+    <h3>Obciążenie ciągłe <input type="checkbox" ${triStateCheckAttrs(qStates)} onchange="bulkToggleElemQ(this.checked)"></h3>
+    ${!noneQ? `
       <div class="btnrow" style="margin-bottom:8px;">
-        <button class="mini ${qMode==='resultant'?'on':''}" onclick="setQMode(${el.id},'resultant')">Wypadkowe</button>
-        <button class="mini ${qMode==='vertical'?'on':''}" onclick="setQMode(${el.id},'vertical')">Rzut pionowy</button>
-        <button class="mini ${qMode==='horizontal'?'on':''}" onclick="setQMode(${el.id},'horizontal')">Rzut poziomy</button>
+        <button class="mini ${qModeCommon==='resultant'?'on':''}" onclick="bulkSetQMode('resultant')">Wypadkowe</button>
+        <button class="mini ${qModeCommon==='vertical'?'on':''}" onclick="bulkSetQMode('vertical')">Rzut pionowy</button>
+        <button class="mini ${qModeCommon==='horizontal'?'on':''}" onclick="bulkSetQMode('horizontal')">Rzut poziomy</button>
       </div>
-      ${pairRow('Wartość pocz.',el.q.qStart,'1','kN/m',`updateElemQ(${el.id},'qStart',this.value)`,'Wartość końc.',el.q.qEnd,'1','kN/m',`updateElemQ(${el.id},'qEnd',this.value)`)}
-      ${qMode==='resultant'? `
-        <div class="row"><label>Kąt</label><input type="number" step="5" value="${el.q.angle}" onchange="updateElemQ(${el.id},'angle',this.value)"><span class="unit">°</span></div>
+      ${pairRow('Wartość pocz.',qStartVal,'1','kN/m',`bulkUpdateElemQ('qStart',this.value)`,'Wartość końc.',qEndVal,'1','kN/m',`bulkUpdateElemQ('qEnd',this.value)`)}
+      ${qModeCommon==='resultant'? `
+        <div class="row"><label>Kąt</label><input type="number" step="5" ${numInputAttrs(qAngleVal)} onchange="bulkUpdateElemQ('angle',this.value)"><span class="unit">°</span></div>
         <div class="btnrow">
-          <button class="mini" onclick="setQAngle(${el.id},270)">Pionowe ↓</button>
-          <button class="mini" onclick="setQAngle(${el.id},90)">Pionowe ↑</button>
-          <button class="mini" onclick="setQPerp(${el.id})">⊥ do pręta</button>
-          ${angleNudgeButtons('nudgeQAngle',el.id)}
+          <button class="mini" onclick="bulkSetQAngle(270)">Pionowe ↓</button>
+          <button class="mini" onclick="bulkSetQAngle(90)">Pionowe ↑</button>
+          <button class="mini" onclick="bulkSetQPerp()">⊥ do pręta</button>
+          ${angleNudgeButtons('bulkNudgeQAngle')}
         </div>
+      ` : qModeCommon? `
+        <div class="muted">Kierunek: ${qModeCommon==='vertical'?'pionowo w dół dla wartości dodatnich (rzut na poziom)':'poziomo w prawo dla wartości dodatnich (rzut na pion)'}. Rzeczywista wartość na pręt jest przeliczana automatycznie wg jego nachylenia.</div>
       ` : `
-        <div class="muted">Kierunek: ${qMode==='vertical'?'pionowo w dół dla wartości dodatnich (rzut na poziom)':'poziomo w prawo dla wartości dodatnich (rzut na pion)'}. Rzeczywista wartość na pręt jest przeliczana automatycznie wg jego nachylenia.</div>
+        <div class="muted">Różne tryby kierunku wśród zaznaczonych prętów — wybierz jeden z powyższych przycisków, aby ujednolicić.</div>
       `}
-    ` : '<div class="muted">Brak obciążenia ciągłego na tym pręcie.</div>'}
+    ` : `<div class="muted">Brak obciążenia ciągłego na ${multi?'zaznaczonych prętach':'tym pręcie'}.</div>`}
   </div>
   <div class="panel">
-    <h3>Temperatura <input type="checkbox" ${el.thermal?'checked':''} onchange="toggleElemT(${el.id},this.checked)"></h3>
-    ${el.thermal? `
-      ${pairRow('ΔT górna',el.thermal.dTtop,'1','°C',`updateElemT(${el.id},'dTtop',this.value)`,'ΔT dolna',el.thermal.dTbottom,'1','°C',`updateElemT(${el.id},'dTbottom',this.value)`)}
-      <div class="muted">„Górna” = strona lokalna +y pręta — zaznacz pręt, aby zobaczyć oznaczenie „góra” na rysunku.</div>
-    ` : '<div class="muted">Brak obciążenia termicznego na tym pręcie.</div>'}
+    <h3>Temperatura <input type="checkbox" ${triStateCheckAttrs(tStates)} onchange="bulkToggleElemT(this.checked)"></h3>
+    ${!noneT? `
+      ${pairRow('ΔT górna',dTopVal,'1','°C',`bulkUpdateElemT('dTtop',this.value)`,'ΔT dolna',dBotVal,'1','°C',`bulkUpdateElemT('dTbottom',this.value)`)}
+      <div class="muted">„Górna” = strona lokalna +y pręta${multi?' każdego pręta':''} — zaznacz pojedynczy pręt, aby zobaczyć oznaczenie „góra” na rysunku.</div>
+    ` : `<div class="muted">Brak obciążenia termicznego na ${multi?'zaznaczonych prętach':'tym pręcie'}.</div>`}
   </div>`;
 }
 
@@ -2235,6 +2417,26 @@ function splitFormHtml(el){
     `}
     <div class="btnrow" style="margin-top:8px;">
       <button class="mini on" onclick="confirmSplit(${el.id})">Podziel</button>
+      <button class="mini" onclick="closeSplitForm()">Anuluj</button>
+    </div>
+  </div>`;
+}
+function splitFormHtmlBulk(elArr){
+  const L0=elLength(elArr[0]);
+  return `<div class="card" style="margin-top:8px;background:var(--surface);border-color:var(--input-border);">
+    <div class="btnrow" style="margin-bottom:8px;">
+      <button class="mini ${splitMode==='single'?'on':''}" onclick="setSplitMode('single')">Pojedynczy podział</button>
+      <button class="mini ${splitMode==='multi'?'on':''}" onclick="setSplitMode('multi')">Podział na N części</button>
+    </div>
+    ${splitMode==='single'? `
+      <div class="row"><label>Punkt t (0–1)</label><input type="number" min="0.02" max="0.98" step="0.05" value="${splitT}" onchange="setSplitT(this.value)"></div>
+      <div class="muted">t liczone od pierwszego do drugiego węzła każdego z ${elArr.length} zaznaczonych prętów (np. dla P${elArr[0].id}: ${fmt(splitT*L0,3)} m od W${elArr[0].n1}).</div>
+    ` : `
+      <div class="row"><label>Liczba części</label><input type="number" min="2" max="30" step="1" value="${splitN}" onchange="setSplitN(this.value)"></div>
+      <div class="muted">Każdy z ${elArr.length} zaznaczonych prętów zostanie podzielony na ${splitN} równych części.</div>
+    `}
+    <div class="btnrow" style="margin-top:8px;">
+      <button class="mini on" onclick="confirmSplitBulk()">Podziel wszystkie</button>
       <button class="mini" onclick="closeSplitForm()">Anuluj</button>
     </div>
   </div>`;
@@ -2275,65 +2477,148 @@ function confirmSplit(elId){
   else { points=[]; for(let i=1;i<splitN;i++) points.push(i/splitN); }
   const newIds=splitElement(elId,points);
   closeSplitForm();
-  selection = newIds.length? {type:'element',id:newIds[0]} : {type:null,id:null};
+  selection = {nodeIds:[], elemIds: newIds.length? [newIds[0]] : []};
+  invalidateResults(); renderSidebar(); render();
+}
+function confirmSplitBulk(){
+  const ids = selectedElements().map(e=>e.id);
+  let points;
+  if(splitMode==='single'){ points=[splitT]; }
+  else { points=[]; for(let i=1;i<splitN;i++) points.push(i/splitN); }
+  let allNewIds=[];
+  ids.forEach(id=>{ allNewIds = allNewIds.concat(splitElement(id,points)); });
+  closeSplitForm();
+  selection = {nodeIds:[], elemIds: allNewIds};
   invalidateResults(); renderSidebar(); render();
 }
 
-/* ---- node/element property update handlers ---- */
-function updateNodeCoord(id,axis,val){ const n=getNode(id); n[axis]=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
-function applySupportPreset(nodeId,key){
-  const n=getNode(nodeId);
-  const angleDeg = n.support? (n.support.angleDeg||0) : 0;
+/* ---- node/element property update handlers ----
+   Every handler below reads the *current* selection itself (selectedNodes()/selectedElements())
+   rather than taking an id, so the exact same functions serve both single-item editing (panel
+   built for a 1-element selection) and bulk editing of a multi-selection (built via the box-select
+   tool): editing a field always applies it to every currently selected node/element. */
+function updateNodeCoordSel(axis,val){ const n=selectedNodes()[0]; if(!n) return; n[axis]=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
+function deleteSelectedNodes(){
+  selectedNodes().map(n=>n.id).forEach(id=>deleteNode(id));
+  selection.nodeIds=[];
+  renderSidebar(); render();
+}
+function bulkApplySupportPreset(key){
   const F=()=>({type:'fixed',delta:0}), Fr=()=>({type:'free'});
-  if(key==='none'){ n.support=null; invalidateResults(); renderSidebar(); render(); return; }
-  let ux,uy,rz;
-  if(key==='fixed'){ ux=F();uy=F();rz=F(); }
-  else if(key==='pin'){ ux=F();uy=F();rz=Fr(); }
-  else if(key==='rollerH'){ ux=Fr();uy=F();rz=Fr(); }
-  else if(key==='rollerV'){ ux=F();uy=Fr();rz=Fr(); }
-  n.support={angleDeg,ux,uy,rz};
+  selectedNodes().forEach(n=>{
+    if(key==='none'){ n.support=null; return; }
+    const angleDeg = n.support? (n.support.angleDeg||0) : 0;
+    let ux,uy,rz;
+    if(key==='fixed'){ ux=F();uy=F();rz=F(); }
+    else if(key==='pin'){ ux=F();uy=F();rz=Fr(); }
+    else if(key==='rollerH'){ ux=Fr();uy=F();rz=Fr(); }
+    else if(key==='rollerV'){ ux=F();uy=Fr();rz=Fr(); }
+    n.support={angleDeg,ux,uy,rz};
+  });
   invalidateResults(); renderSidebar(); render();
 }
-function updateSupportAngle(id,val){ getNode(id).support.angleDeg=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
-function nudgeSupportAngle(id,delta){ const n=getNode(id); n.support.angleDeg=normalizeAngle((n.support.angleDeg||0)+delta); invalidateResults(); renderSidebar(); render(); }
-function updateSupportDir(id,key,field,val){
-  const n=getNode(id);
-  if(!n.support) n.support={angleDeg:0,ux:{type:'free'},uy:{type:'free'},rz:{type:'free'}};
-  if(!n.support[key]) n.support[key]={type:'free'};
-  if(field==='type'){
-    const old=n.support[key];
-    n.support[key]={type:val, k: val==='spring'?(old.k||1000):undefined, delta: old.delta||0};
-  } else if(field==='k'){ n.support[key].k=parseFloat(val)||0; }
-  else if(field==='delta'){ n.support[key].delta=parseFloat(val)||0; }
+function bulkUpdateSupportAngle(val){
+  const v=parseFloat(val)||0;
+  selectedNodes().forEach(n=>{ if(!n.support) n.support={angleDeg:0,ux:{type:'free'},uy:{type:'free'},rz:{type:'free'}}; n.support.angleDeg=v; });
   invalidateResults(); renderSidebar(); render();
 }
-function toggleNodeForce(id,on){ const n=getNode(id); n.force = on? {F:10,angle:270} : null; invalidateResults(); renderSidebar(); render(); }
-function updateNodeForce(id,field,val){ getNode(id).force[field]=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
-function setForceAngle(id,ang){ getNode(id).force.angle=ang; invalidateResults(); renderSidebar(); render(); }
-function nudgeForceAngle(id,delta){ const n=getNode(id); n.force.angle=normalizeAngle((n.force.angle||0)+delta); invalidateResults(); renderSidebar(); render(); }
-function toggleNodeMoment(id,on){ const n=getNode(id); n.moment = on? {M:10} : null; invalidateResults(); renderSidebar(); render(); }
-function updateNodeMoment(id,val){ getNode(id).moment.M=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
+function bulkNudgeSupportAngle(delta){
+  selectedNodes().forEach(n=>{ if(!n.support) n.support={angleDeg:0,ux:{type:'free'},uy:{type:'free'},rz:{type:'free'}}; n.support.angleDeg=normalizeAngle((n.support.angleDeg||0)+delta); });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkUpdateSupportDir(key,field,val){
+  selectedNodes().forEach(n=>{
+    if(!n.support) n.support={angleDeg:0,ux:{type:'free'},uy:{type:'free'},rz:{type:'free'}};
+    if(!n.support[key]) n.support[key]={type:'free'};
+    if(field==='type'){
+      const old=n.support[key];
+      n.support[key]={type:val, k: val==='spring'?(old.k||1000):undefined, delta: old.delta||0};
+    } else if(field==='k'){ n.support[key].k=parseFloat(val)||0; }
+    else if(field==='delta'){ n.support[key].delta=parseFloat(val)||0; }
+  });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkToggleNodeForce(checked){
+  selectedNodes().forEach(n=>{ n.force = checked? (n.force||{F:10,angle:270}) : null; });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkUpdateNodeForce(field,val){
+  const v=parseFloat(val)||0;
+  selectedNodes().forEach(n=>{ if(!n.force) n.force={F:10,angle:270}; n.force[field]=v; });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkSetForceAngle(ang){
+  selectedNodes().forEach(n=>{ if(!n.force) n.force={F:10,angle:270}; n.force.angle=ang; });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkNudgeForceAngle(delta){
+  selectedNodes().forEach(n=>{ if(!n.force) n.force={F:10,angle:270}; n.force.angle=normalizeAngle((n.force.angle||0)+delta); });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkToggleNodeMoment(checked){
+  selectedNodes().forEach(n=>{ n.moment = checked? (n.moment||{M:10}) : null; });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkUpdateNodeMoment(val){
+  const v=parseFloat(val)||0;
+  selectedNodes().forEach(n=>{ if(!n.moment) n.moment={M:10}; n.moment.M=v; });
+  invalidateResults(); renderSidebar(); render();
+}
 
-function updateElemField(id,field,val){ const el=getElement(id); el[field]=val; invalidateResults(); renderSidebar(); render(); }
-function toggleElemQ(id,on){ const el=getElement(id); el.q = on? {qStart:5,qEnd:5,angle:270,mode:'resultant'} : null; invalidateResults(); renderSidebar(); render(); }
-function setQMode(id,mode){
-  const el=getElement(id);
-  el.q.mode=mode;
-  if(mode==='vertical') el.q.angle=270;
-  else if(mode==='horizontal') el.q.angle=0;
+function deleteSelectedElements(){
+  selectedElements().map(e=>e.id).forEach(id=>deleteElement(id));
+  selection.elemIds=[];
+  renderSidebar(); render();
+}
+function bulkUpdateElemField(field,val){
+  selectedElements().forEach(el=>{ el[field]=val; });
   invalidateResults(); renderSidebar(); render();
 }
-function updateElemQ(id,field,val){ getElement(id).q[field]=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
-function setQAngle(id,ang){ getElement(id).q.angle=ang; invalidateResults(); renderSidebar(); render(); }
-function nudgeQAngle(id,delta){ const el=getElement(id); el.q.angle=normalizeAngle((el.q.angle||0)+delta); invalidateResults(); renderSidebar(); render(); }
-function setQPerp(id){
-  const el=getElement(id), a=getNode(el.n1), b=getNode(el.n2);
-  let angDeg = Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI + 90;
-  el.q.angle = Math.round(angDeg*10)/10;
+function bulkToggleElemQ(checked){
+  selectedElements().forEach(el=>{ el.q = checked? (el.q||{qStart:5,qEnd:5,angle:270,mode:'resultant'}) : null; });
   invalidateResults(); renderSidebar(); render();
 }
-function toggleElemT(id,on){ const el=getElement(id); el.thermal = on? {dTtop:20,dTbottom:0} : null; invalidateResults(); renderSidebar(); render(); }
-function updateElemT(id,field,val){ getElement(id).thermal[field]=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
+function bulkSetQMode(mode){
+  selectedElements().forEach(el=>{
+    if(!el.q) el.q={qStart:5,qEnd:5,angle:270,mode:'resultant'};
+    el.q.mode=mode;
+    if(mode==='vertical') el.q.angle=270;
+    else if(mode==='horizontal') el.q.angle=0;
+  });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkUpdateElemQ(field,val){
+  const v=parseFloat(val)||0;
+  selectedElements().forEach(el=>{ if(!el.q) el.q={qStart:5,qEnd:5,angle:270,mode:'resultant'}; el.q[field]=v; });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkSetQAngle(ang){
+  selectedElements().forEach(el=>{ if(!el.q) el.q={qStart:5,qEnd:5,angle:270,mode:'resultant'}; el.q.angle=ang; });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkNudgeQAngle(delta){
+  selectedElements().forEach(el=>{ if(!el.q) el.q={qStart:5,qEnd:5,angle:270,mode:'resultant'}; el.q.angle=normalizeAngle((el.q.angle||0)+delta); });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkSetQPerp(){
+  // perpendicular-to-bar direction is per-element geometry, so each selected element gets its own angle
+  selectedElements().forEach(el=>{
+    if(!el.q) el.q={qStart:5,qEnd:5,angle:270,mode:'resultant'};
+    const a=getNode(el.n1), b=getNode(el.n2);
+    const angDeg = Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI + 90;
+    el.q.angle = Math.round(angDeg*10)/10;
+  });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkToggleElemT(checked){
+  selectedElements().forEach(el=>{ el.thermal = checked? (el.thermal||{dTtop:20,dTbottom:0}) : null; });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkUpdateElemT(field,val){
+  const v=parseFloat(val)||0;
+  selectedElements().forEach(el=>{ if(!el.thermal) el.thermal={dTtop:20,dTbottom:0}; el.thermal[field]=v; });
+  invalidateResults(); renderSidebar(); render();
+}
 
 /* =========================================================================
    SIDEBAR — results panel
