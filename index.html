@@ -1116,6 +1116,96 @@ function deleteElement(id){
   invalidateResults();
 }
 
+function mergeNodeInto(sourceId, targetId){
+  if(sourceId === targetId) return;
+  const src = getNode(sourceId);
+  const tgt = getNode(targetId);
+  if(!src || !tgt) return;
+
+  // 1. Przeniesienie / połączenie podpór i obciążeń z usuwanego węzła do docelowego
+  if(src.support && !tgt.support){
+    tgt.support = JSON.parse(JSON.stringify(src.support));
+  }
+  if(src.force){
+    if(!tgt.force){
+      tgt.force = JSON.parse(JSON.stringify(src.force));
+    } else {
+      const a1 = (tgt.force.angle || 0) * Math.PI / 180;
+      const a2 = (src.force.angle || 0) * Math.PI / 180;
+      const fx = (tgt.force.F || 0) * Math.cos(a1) + (src.force.F || 0) * Math.cos(a2);
+      const fy = (tgt.force.F || 0) * Math.sin(a1) + (src.force.F || 0) * Math.sin(a2);
+      const F = Math.hypot(fx, fy);
+      if(F > 1e-4){
+        let ang = Math.atan2(fy, fx) * 180 / Math.PI;
+        if(ang < 0) ang += 360;
+        tgt.force = { F: Math.round(F * 1000) / 1000, angle: Math.round(ang * 100) / 100 };
+      } else {
+        tgt.force = null;
+      }
+    }
+  }
+  if(src.moment){
+    if(!tgt.moment){
+      tgt.moment = JSON.parse(JSON.stringify(src.moment));
+    } else {
+      const newM = (tgt.moment.M || 0) + (src.moment.M || 0);
+      if(Math.abs(newM) > 1e-4){
+        tgt.moment = { M: Math.round(newM * 1000) / 1000 };
+      } else {
+        tgt.moment = null;
+      }
+    }
+  }
+
+  // 2. Aktualizacja wszystkich prętów dochodzących do usuwanego węzła
+  elements.forEach(e => {
+    if(e.n1 === sourceId) e.n1 = targetId;
+    if(e.n2 === sourceId) e.n2 = targetId;
+  });
+
+  // 3. Usunięcie prętów o zerowej długości (które łączyły src i tgt)
+  elements = elements.filter(e => e.n1 !== e.n2);
+
+  // 4. Usunięcie nałożonych na siebie prętów (zostawiamy tylko jeden dla danej pary węzłów)
+  const uniqueElements = [];
+  const seenPairs = new Set();
+  elements.forEach(e => {
+    const minN = Math.min(e.n1, e.n2);
+    const maxN = Math.max(e.n1, e.n2);
+    const pairKey = minN + '_' + maxN;
+    if(!seenPairs.has(pairKey)){
+      seenPairs.add(pairKey);
+      uniqueElements.push(e);
+    }
+  });
+  elements = uniqueElements;
+
+  // 5. Usunięcie źródłowego węzła
+  nodes = nodes.filter(n => n.id !== sourceId);
+
+  // 6. Aktualizacja zaznaczenia
+  if(selection.nodeIds.includes(sourceId)){
+    selection.nodeIds = selection.nodeIds.filter(id => id !== sourceId);
+    if(!selection.nodeIds.includes(targetId)) selection.nodeIds.push(targetId);
+  }
+  const validElemIds = new Set(elements.map(e => e.id));
+  selection.elemIds = selection.elemIds.filter(id => validElemIds.has(id));
+
+  invalidateResults();
+  setStatusHint(`Połączono węzeł W${sourceId} z istniejącym węzłem W${targetId}.`);
+}
+
+function checkAndMergeCoincidentNode(nodeId){
+  const node = getNode(nodeId);
+  if(!node) return null;
+  const target = nodes.find(n => n.id !== nodeId && Math.hypot(n.x - node.x, n.y - node.y) < 1e-4);
+  if(target){
+    mergeNodeInto(nodeId, target.id);
+    return target.id;
+  }
+  return null;
+}
+
 /* =========================================================================
    RENDERING
    ========================================================================= */
@@ -2103,6 +2193,18 @@ function handlePointerDown(px,py){
 function performTapAction(tapMode,px,py){
   const mp=toModel(px,py);
   if(tapMode==='addNode'){
+    const nid=hitTestNode(px,py);
+    if(nid!=null){
+      setStatusHint('Węzeł w tym miejscu już istnieje.');
+      return;
+    }
+    const snappedX = snap(mp.x);
+    const snappedY = snap(mp.y);
+    const existing = nodes.find(n => Math.hypot(n.x - snappedX, n.y - snappedY) < 1e-4);
+    if(existing){
+      setStatusHint('Węzeł o tych współrzędnych już istnieje.');
+      return;
+    }
     createNode(mp.x,mp.y); renderSidebar(); render();
   } else if(tapMode==='addBar'){
     const nid=hitTestNode(px,py);
@@ -2110,9 +2212,30 @@ function performTapAction(tapMode,px,py){
       setStatusHint('Tryb: Dodaj pręt — „Nowe węzły” wyłączone: kliknij istniejący węzeł');
       return;
     }
-    const useId = nid!=null? nid : createNode(mp.x,mp.y);
-    if(barStart==null){ barStart=useId; setStatusHint('Tryb: Dodaj pręt — wybierz węzeł końcowy'); }
-    else if(barStart!==useId){ createElement(barStart,useId); barStart=useId; }
+    let useId = nid;
+    if(useId == null){
+      const snappedX = snap(mp.x);
+      const snappedY = snap(mp.y);
+      const existing = nodes.find(n => Math.hypot(n.x - snappedX, n.y - snappedY) < 1e-4);
+      useId = existing ? existing.id : createNode(mp.x,mp.y);
+    }
+    if(barStart==null){
+      barStart=useId;
+      setStatusHint('Tryb: Dodaj pręt — wybierz węzeł końcowy');
+    } else if(barStart===useId){
+      setStatusHint('Wybrano ten sam węzeł.');
+    } else {
+      const exists = elements.some(e=>(e.n1===barStart&&e.n2===useId)||(e.n1===useId&&e.n2===barStart));
+      if(exists){
+        setStatusHint(`Pręt między węzłami W${barStart} i W${useId} już istnieje.`);
+        barStart=useId;
+      } else {
+        const createdId = createElement(barStart,useId);
+        if(createdId!=null){
+          barStart=useId;
+        }
+      }
+    }
     renderSidebar(); render();
   } else if(tapMode==='delete'){
     const nid=hitTestNode(px,py);
@@ -2162,7 +2285,12 @@ function handlePointerMove(px,py){
 function onUp(e){ handlePointerUp(); }
 function handlePointerUp(){
   hoverNodeId=null; hoverElemId=null;
-  if(dragNode!=null){ dragNode=null; renderSidebar(); render(); }
+  if(dragNode!=null){
+    const draggedId = dragNode;
+    dragNode=null;
+    checkAndMergeCoincidentNode(draggedId);
+    renderSidebar(); render();
+  }
   if(boxSelectState){
     if(boxSelectState.moved){
       const x0=Math.min(boxSelectState.startX,boxSelectState.curX), x1=Math.max(boxSelectState.startX,boxSelectState.curX);
@@ -2832,7 +2960,16 @@ function splitSelectedElementsAtIntersections(){
    rather than taking an id, so the exact same functions serve both single-item editing (panel
    built for a 1-element selection) and bulk editing of a multi-selection (built via the box-select
    tool): editing a field always applies it to every currently selected node/element. */
-function updateNodeCoordSel(axis,val){ const n=selectedNodes()[0]; if(!n) return; n[axis]=parseFloat(val)||0; invalidateResults(); renderSidebar(); render(); }
+function updateNodeCoordSel(axis,val){
+  const n=selectedNodes()[0];
+  if(!n) return;
+  n[axis]=parseFloat(val)||0;
+  const targetId = checkAndMergeCoincidentNode(n.id);
+  if(targetId!=null){
+    selection.nodeIds=[targetId];
+  }
+  invalidateResults(); renderSidebar(); render();
+}
 function deleteSelectedNodes(){
   selectedNodes().map(n=>n.id).forEach(id=>deleteNode(id));
   selection.nodeIds=[];
