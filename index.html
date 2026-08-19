@@ -1964,6 +1964,7 @@ function onDown(e){
   handlePointerDown(e.clientX-rect.left, e.clientY-rect.top);
 }
 function handlePointerDown(px,py){
+  hoverNodeId=null; hoverElemId=null;
   if(mode==='select'){
     const nid=hitTestNode(px,py);
     if(nid!=null){ selection={nodeIds:[nid],elemIds:[]}; dragNode=nid; renderSidebar(); render(); return; }
@@ -2052,7 +2053,8 @@ function handlePointerMove(px,py){
 }
 function onUp(e){ handlePointerUp(); }
 function handlePointerUp(){
-  if(dragNode!=null){ dragNode=null; renderSidebar(); }
+  hoverNodeId=null; hoverElemId=null;
+  if(dragNode!=null){ dragNode=null; renderSidebar(); render(); }
   if(boxSelectState){
     if(boxSelectState.moved){
       const x0=Math.min(boxSelectState.startX,boxSelectState.curX), x1=Math.max(boxSelectState.startX,boxSelectState.curX);
