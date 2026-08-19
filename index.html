@@ -2451,6 +2451,7 @@ function panelElement(elArr){
       <div class="btnrow">
         <button class="mini danger" onclick="deleteSelectedElements()">Usuń zaznaczone pręty</button>
         <button class="mini" onclick="openSplitForm('__bulk__')">Podziel zaznaczone pręty</button>
+        <button class="mini" onclick="splitSelectedElementsAtIntersections()">Znajdź przecięcia prętów</button>
       </div>
       ${splitFormElId==='__bulk__'? splitFormHtmlBulk(elArr) : ''}
     </div>`;
@@ -2606,6 +2607,173 @@ function confirmSplitBulk(){
   closeSplitForm();
   selection = {nodeIds:[], elemIds: allNewIds};
   invalidateResults(); renderSidebar(); render();
+}
+
+function findOrCreateNodeAt(x, y, tol=1e-4){
+  const existing = nodes.find(n => Math.hypot(n.x - x, n.y - y) < tol);
+  if(existing) return existing.id;
+  return createNode(x, y, true);
+}
+
+function splitSelectedElementsAtIntersections(){
+  const elArr = selectedElements();
+  if(elArr.length < 2){
+    setStatusHint('Zaznacz co najmniej 2 pręty, aby znaleźć ich punkty przecięcia.');
+    return;
+  }
+
+  // Mapa przecięć dla każdego zaznaczonego pręta: elId -> array of { t, nodeId }
+  const cutsMap = new Map();
+  elArr.forEach(el => cutsMap.set(el.id, []));
+
+  const EPS = 1e-5;
+  const initialNodesCount = nodes.length;
+
+  for(let i = 0; i < elArr.length; i++){
+    const el1 = elArr[i];
+    const a1 = getNode(el1.n1), b1 = getNode(el1.n2);
+    if(!a1 || !b1) continue;
+    const v1x = b1.x - a1.x, v1y = b1.y - a1.y;
+    const L1sq = v1x * v1x + v1y * v1y;
+    if(L1sq < 1e-10) continue;
+
+    for(let j = i + 1; j < elArr.length; j++){
+      const el2 = elArr[j];
+      const a2 = getNode(el2.n1), b2 = getNode(el2.n2);
+      if(!a2 || !b2) continue;
+      const v2x = b2.x - a2.x, v2y = b2.y - a2.y;
+      const L2sq = v2x * v2x + v2y * v2y;
+      if(L2sq < 1e-10) continue;
+
+      const det = v1x * v2y - v1y * v2x;
+      const dx = a2.x - a1.x;
+      const dy = a2.y - a1.y;
+
+      if(Math.abs(det) > 1e-9){
+        // Przecięcie prostych nierównoległych
+        const t1 = (dx * v2y - dy * v2x) / det;
+        const t2 = (dx * v1y - dy * v1x) / det;
+
+        if(t1 >= -EPS && t1 <= 1 + EPS && t2 >= -EPS && t2 <= 1 + EPS){
+          const clampedT1 = Math.max(0, Math.min(1, t1));
+          const clampedT2 = Math.max(0, Math.min(1, t2));
+          const ix = a1.x + clampedT1 * v1x;
+          const iy = a1.y + clampedT1 * v1y;
+
+          const isInternal1 = clampedT1 > EPS && clampedT1 < 1 - EPS;
+          const isInternal2 = clampedT2 > EPS && clampedT2 < 1 - EPS;
+
+          if(isInternal1 || isInternal2){
+            const nodeId = findOrCreateNodeAt(ix, iy);
+            if(isInternal1){
+              cutsMap.get(el1.id).push({ t: clampedT1, nodeId });
+            }
+            if(isInternal2){
+              cutsMap.get(el2.id).push({ t: clampedT2, nodeId });
+            }
+          }
+        }
+      } else {
+        // Równoległe lub współliniowe - sprawdzamy czy węzły końcowe leżą na wnętrzu drugiego odcinka
+        const checkEndpointOnSeg = (pt, segEl, segA, segVx, segVy, segLsq) => {
+          const projT = ((pt.x - segA.x) * segVx + (pt.y - segA.y) * segVy) / segLsq;
+          if(projT > EPS && projT < 1 - EPS){
+            const px = segA.x + projT * segVx;
+            const py = segA.y + projT * segVy;
+            if(Math.hypot(pt.x - px, pt.y - py) < 1e-4){
+              const nodeId = findOrCreateNodeAt(pt.x, pt.y);
+              cutsMap.get(segEl.id).push({ t: projT, nodeId });
+            }
+          }
+        };
+        checkEndpointOnSeg(a2, el1, a1, v1x, v1y, L1sq);
+        checkEndpointOnSeg(b2, el1, a1, v1x, v1y, L1sq);
+        checkEndpointOnSeg(a1, el2, a2, v2x, v2y, L2sq);
+        checkEndpointOnSeg(b1, el2, a2, v2x, v2y, L2sq);
+      }
+    }
+  }
+
+  let totalSplits = 0;
+  cutsMap.forEach(cuts => {
+    if(cuts.length > 0) totalSplits += cuts.length;
+  });
+
+  if(totalSplits === 0){
+    setStatusHint('Nie znaleziono punktów przecięcia między zaznaczonymi prętami.');
+    return;
+  }
+
+  const finalElemIds = [];
+
+  elArr.forEach(el => {
+    const rawCuts = cutsMap.get(el.id) || [];
+    if(rawCuts.length === 0){
+      finalElemIds.push(el.id);
+      return;
+    }
+
+    rawCuts.sort((a, b) => a.t - b.t);
+    const uniqueCuts = [];
+    rawCuts.forEach(c => {
+      if(!uniqueCuts.some(u => Math.abs(u.t - c.t) < 1e-4 || u.nodeId === c.nodeId)){
+        uniqueCuts.push(c);
+      }
+    });
+
+    if(uniqueCuts.length === 0){
+      finalElemIds.push(el.id);
+      return;
+    }
+
+    const allNodes = [el.n1, ...uniqueCuts.map(c => c.nodeId), el.n2];
+    const allT = [0, ...uniqueCuts.map(c => c.t), 1];
+    const numSegs = allNodes.length - 1;
+
+    for(let k = 0; k < numSegs; k++){
+      const startN = allNodes[k];
+      const endN = allNodes[k + 1];
+      const t0 = allT[k];
+      const t1 = allT[k + 1];
+
+      const newId = createElement(startN, endN);
+      if(newId == null) continue;
+      const ne = getElement(newId);
+      ne.sectionId = el.sectionId;
+      ne.materialId = el.materialId;
+      ne.hingeStart = (k === 0) ? !!el.hingeStart : false;
+      ne.hingeEnd = (k === numSegs - 1) ? !!el.hingeEnd : false;
+      if(el.hingeStart && el.momentHingeStart && (k === 0)){
+        ne.momentHingeStart = el.momentHingeStart;
+      }
+      if(el.hingeEnd && el.momentHingeEnd && (k === numSegs - 1)){
+        ne.momentHingeEnd = el.momentHingeEnd;
+      }
+      if(el.thermal){
+        ne.thermal = { dTtop: el.thermal.dTtop, dTbottom: el.thermal.dTbottom };
+      }
+      if(el.q){
+        const qAt = (t) => el.q.qStart + (el.q.qEnd - el.q.qStart) * t;
+        ne.q = {
+          qStart: qAt(t0),
+          qEnd: qAt(t1),
+          angle: el.q.angle,
+          mode: el.q.mode || 'resultant'
+        };
+      }
+      finalElemIds.push(newId);
+    }
+
+    deleteElement(el.id);
+  });
+
+  const createdNodesCount = nodes.length - initialNodesCount;
+  selection = { nodeIds: [], elemIds: finalElemIds };
+  invalidateResults();
+  renderSidebar();
+  render();
+
+  setStatusHint(`Znaleziono przecięcia: podzielono pręty i dodano ${createdNodesCount} ${createdNodesCount === 1 ? 'nowy węzeł' : 'nowe węzły/węzłów'}.`);
 }
 
 /* ---- node/element property update handlers ----
