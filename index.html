@@ -100,15 +100,55 @@
   #main{flex:1;display:flex;min-height:0;}
   #canvasWrap{flex:1;position:relative;background:var(--bg-canvas);overflow:hidden;}
   canvas{display:block;width:100%;height:100%;cursor:default;touch-action:none;-webkit-user-select:none;user-select:none;}
-  #statusbar{
-    position:absolute;left:0;right:0;bottom:0;
-    background:var(--surface-translucent);border-top:1px solid var(--sidebar-border);
-    padding:5px 12px;font-size:11.5px;color:var(--text-dim);
-    display:flex;justify-content:space-between;font-family:var(--mono);
-    backdrop-filter:blur(2px);
-  }
+
   #hint{color:var(--accent-dark);font-family:var(--sans);font-weight:600;}
-  #zoomCtl{position:absolute;right:14px;bottom:34px;display:flex;flex-direction:column;gap:4px;}
+  /* Kontener pozycjonujący na dole płótna */
+  #canvasBottomOverlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    pointer-events: none; /* Pozwala klikać w canvas w wolnych miejscach */
+    z-index: 10;
+  }
+  
+  /* Wiersz przycisków i skali tuż nad pakiem statusu */
+  #overlayRow {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 0 14px 10px 14px;
+  }
+  
+  /* Przywrócenie interakcji dla samych elementów */
+  #zoomCtl, #statusbar {
+    pointer-events: auto;
+  }
+  
+  #zoomCtl {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-left: auto; /* Dopycha do prawej krawędzi gdy lewa strona jest pusta */
+  }
+  
+  #statusbar {
+    position: relative; /* Odpięcie od absolute – wysokość dopasowuje się naturalnie */
+    background: var(--surface-translucent);
+    border-top: 1px solid var(--sidebar-border);
+    padding: 5px 12px;
+    font-size: 11.5px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    backdrop-filter: blur(2px);
+  }
+  
+  #coords {text-align: right;}
+  
   .zbtn{width:30px;height:30px;border-radius:7px;border:1px solid var(--sidebar-border);
     background:var(--surface);cursor:pointer;font-size:16px;color:var(--text);box-shadow:0 1px 3px #0002;}
   .zbtn:hover{background:var(--accent-soft);}
@@ -202,14 +242,19 @@
   <div id="main">
     <div id="canvasWrap">
       <canvas id="cv"></canvas>
-      <div id="zoomCtl">
-        <button class="zbtn" id="zoomIn" title="Powiększ">+</button>
-        <button class="zbtn" id="zoomOut" title="Pomniejsz">−</button>
-        <button class="zbtn" id="zoomFit" title="Dopasuj widok">⤢</button>
-      </div>
-      <div id="statusbar">
-        <span id="hint">Tryb: Zaznacz</span>
-        <span id="coords">x=0.00 m, y=0.00 m</span>
+      
+      <div id="canvasBottomOverlay">
+        <div id="overlayRow">
+          <div id="zoomCtl">
+            <button class="zbtn" id="zoomIn" title="Powiększ">+</button>
+            <button class="zbtn" id="zoomOut" title="Pomniejsz">−</button>
+            <button class="zbtn" id="zoomFit" title="Dopasuj widok">⤢</button>
+          </div>
+        </div>
+        <div id="statusbar">
+          <span id="hint">Tryb: Zaznacz</span>
+          <span id="coords">x=0.00 m, y=0.00 m</span>
+        </div>
       </div>
     </div>
     <div id="sidebar"></div>
@@ -1559,22 +1604,35 @@ function niceScaleValue(maxPx,pxPerMeter){
   return best;
 }
 function drawScaleBar(){
-  const rect=canvas.getBoundingClientRect();
-  const maxPx=120;
-  const val=niceScaleValue(maxPx,view.scale);
-  const barPx=val*view.scale;
-  const marginLeft=16, y=rect.height-42;
-  const x0=marginLeft, x1=marginLeft+barPx;
-  const label=(val>=1? val : val)+' m';
-  ctx.font='10.5px '+FONT_MONO;
-  ctx.strokeStyle=getCss('--ink'); ctx.lineWidth=1.6;
+  const rect = canvas.getBoundingClientRect();
+  const maxPx = 120;
+  const val = niceScaleValue(maxPx, view.scale);
+  const barPx = val * view.scale;
+  
+  // Pobieramy aktualną wysokość paska statusu z DOM
+  const statusbarEl = document.getElementById('statusbar');
+  const statusbarHeight = statusbarEl ? statusbarEl.offsetHeight : 30;
+  
+  // Umieszczamy skalę 15px nad górną krawędzią paska statusu
+  const marginLeft = 16;
+  const y = rect.height - statusbarHeight - 15;
+  
+  const x0 = marginLeft, x1 = marginLeft + barPx;
+  const label = (val >= 1 ? val : val) + ' m';
+  
+  ctx.font = '10.5px ' + FONT_MONO;
+  ctx.strokeStyle = getCss('--ink'); 
+  ctx.lineWidth = 1.6;
+  
   ctx.beginPath();
-  ctx.moveTo(x0,y); ctx.lineTo(x1,y);
-  ctx.moveTo(x0,y-5); ctx.lineTo(x0,y+5);
-  ctx.moveTo(x1,y-5); ctx.lineTo(x1,y+5);
+  ctx.moveTo(x0, y); ctx.lineTo(x1, y);
+  ctx.moveTo(x0, y - 5); ctx.lineTo(x0, y + 5);
+  ctx.moveTo(x1, y - 5); ctx.lineTo(x1, y + 5);
   ctx.stroke();
-  ctx.fillStyle=getCss('--ink'); ctx.textAlign='left';
-  ctx.fillText(label, x0, y-8);
+  
+  ctx.fillStyle = getCss('--ink'); 
+  ctx.textAlign = 'left';
+  ctx.fillText(label, x0, y - 8);
 }
 
 /* =========================================================================
@@ -1962,7 +2020,7 @@ function onMove(e){
 function handlePointerMove(px,py){
   mouseModel=toModel(px,py);
   const coordsEl=document.getElementById('coords');
-  if(coordsEl) coordsEl.textContent = `x=${mouseModel.x.toFixed(2)} m,  y=${mouseModel.y.toFixed(2)} m`;
+  if(coordsEl) coordsEl.textContent = `x=${mouseModel.x.toFixed(2)}\u00A0m,  y=${mouseModel.y.toFixed(2)}\u00A0m`;
   if(dragNode!=null){
     const n=getNode(dragNode);
     n.x=snap(mouseModel.x); n.y=snap(mouseModel.y);
