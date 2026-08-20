@@ -866,12 +866,56 @@ let showDeform=false, showM=false, showT=false, showN=false, showStress=false, s
 let lastResultView={showDeform:true, showM:false, showT:false, showN:false, showStress:false, showReactions:true};
 
 /* ---- program options (persist across model edits & undo/redo, NOT part of the structural model) ---- */
+const STORAGE_OPTIONS_KEY = 'mes2d_user_options';
+
 let currentTheme='light';
 let includeAxialDeformation=true;
 let includeSelfWeight=false;
 let hideLoadsSupportsInResults=false;
 let showBackgroundGrid=true;
 let showIdLabels=false;
+
+function saveAppOptionsToStorage(){
+  try {
+    const opts = {
+      theme: currentTheme,
+      includeAxialDeformation,
+      includeSelfWeight,
+      hideLoadsSupportsInResults,
+      showBackgroundGrid,
+      showIdLabels
+    };
+    localStorage.setItem(STORAGE_OPTIONS_KEY, JSON.stringify(opts));
+  } catch(e){}
+}
+
+function loadAppOptionsFromStorage(){
+  try {
+    const raw = localStorage.getItem(STORAGE_OPTIONS_KEY);
+    if(!raw) return;
+    const opts = JSON.parse(raw);
+    if(opts && (opts.theme === 'dark' || opts.theme === 'light')){
+      currentTheme = opts.theme;
+      document.documentElement.setAttribute('data-theme', currentTheme);
+    }
+    if(opts && typeof opts.includeAxialDeformation === 'boolean'){
+      includeAxialDeformation = opts.includeAxialDeformation;
+    }
+    if(opts && typeof opts.includeSelfWeight === 'boolean'){
+      includeSelfWeight = opts.includeSelfWeight;
+    }
+    if(opts && typeof opts.hideLoadsSupportsInResults === 'boolean'){
+      hideLoadsSupportsInResults = opts.hideLoadsSupportsInResults;
+    }
+    if(opts && typeof opts.showBackgroundGrid === 'boolean'){
+      showBackgroundGrid = opts.showBackgroundGrid;
+    }
+    if(opts && typeof opts.showIdLabels === 'boolean'){
+      showIdLabels = opts.showIdLabels;
+    }
+  } catch(e){}
+}
+loadAppOptionsFromStorage();
 const AXIAL_RIGID_FACTOR=1e5; // used to emulate "no axial deformation" without touching the FEM core
 let deformMult=1, diagMult=1;  // user multipliers on auto scale
 let autoDeform=1, autoDiagM=1, autoDiagT=1, autoDiagN=1, autoDiagS=1;
@@ -2215,6 +2259,7 @@ function setTheme(theme){
   currentTheme=theme;
   document.documentElement.setAttribute('data-theme', theme==='dark'?'dark':'light');
   clearCssCache();
+  saveAppOptionsToStorage();
   render();
   if(document.getElementById('optionsOverlay')) openOptionsModal(); // refresh active state
 }
@@ -2265,11 +2310,11 @@ function openOptionsModal(){
   document.getElementById('optionsCloseBtn').addEventListener('click', closeOptionsModal);
   document.getElementById('themeLightBtn').addEventListener('click', ()=>setTheme('light'));
   document.getElementById('themeDarkBtn').addEventListener('click', ()=>setTheme('dark'));
-  document.getElementById('axialOpt').addEventListener('change',(e)=>{ includeAxialDeformation=e.target.checked; invalidateResults(); renderSidebar(); render(); });
-  document.getElementById('selfWeightOpt').addEventListener('change',(e)=>{ includeSelfWeight=e.target.checked; invalidateResults(); renderSidebar(); render(); });
-  document.getElementById('hideLSOpt').addEventListener('change',(e)=>{ hideLoadsSupportsInResults=e.target.checked; render(); });
-  document.getElementById('gridOpt').addEventListener('change',(e)=>{ showBackgroundGrid=e.target.checked; render(); });
-  document.getElementById('labelsOpt').addEventListener('change',(e)=>{ showIdLabels=e.target.checked; render(); });
+  document.getElementById('axialOpt').addEventListener('change',(e)=>{ includeAxialDeformation=e.target.checked; saveAppOptionsToStorage(); invalidateResults(); renderSidebar(); render(); });
+  document.getElementById('selfWeightOpt').addEventListener('change',(e)=>{ includeSelfWeight=e.target.checked; saveAppOptionsToStorage(); invalidateResults(); renderSidebar(); render(); });
+  document.getElementById('hideLSOpt').addEventListener('change',(e)=>{ hideLoadsSupportsInResults=e.target.checked; saveAppOptionsToStorage(); render(); });
+  document.getElementById('gridOpt').addEventListener('change',(e)=>{ showBackgroundGrid=e.target.checked; saveAppOptionsToStorage(); render(); });
+  document.getElementById('labelsOpt').addEventListener('change',(e)=>{ showIdLabels=e.target.checked; saveAppOptionsToStorage(); render(); });
 }
 function closeOptionsModal(){ const o=document.getElementById('optionsOverlay'); if(o) o.remove(); }
 
