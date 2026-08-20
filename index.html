@@ -2,7 +2,7 @@
 <html lang="pl" data-theme="light">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Materia Lite</title>
 <link rel="icon" type="image/png" href="logo64.png">
 <style>
@@ -158,18 +158,42 @@
   /* ---------- Sidebar ---------- */
   #sidebar{
     width:352px;flex-shrink:0;background:var(--sidebar-bg);border-left:1px solid var(--sidebar-border);
-    overflow-y:auto;font-size:12.5px;
+    font-size:12.5px;
+    display:flex;flex-direction:column;min-height:0;
   }
+  /* Cała treść panelu przewija się TYLKO tutaj — natywnie, bez żadnego JS
+     na touchmove. To jedyny element ze scrollem, dzięki czemu przeglądarka
+     nigdy nie musi arbitrować między "to scroll" a "to JS gesture". */
+  #sidebarScroll{
+    flex:1 1 auto;min-height:0;overflow-y:auto;
+  }
+  /* Uchwyt do zmiany wysokości panelu — istnieje i jest widoczny tylko
+     w trybie mobilnym (patrz media query niżej). Na desktopie panel ma
+     stałą, sterowaną przez CSS flex wysokość i uchwyt jest ukryty/nieaktywny. */
+  #panelHandle{ display:none; }
 
   /* ---------- Responsive: phone / narrow portrait -> sidebar becomes a bottom panel ---------- */
   @media (max-width: 860px){
     #main{ flex-direction:column; }
     #canvasWrap{ flex:1 1 auto; min-height:140px; }
     #sidebar{
-      width:100%; flex:0 0 auto; max-height:44vh; min-height:170px;
+      width:100%; flex:0 0 auto; height:44vh; min-height:170px; max-height:62vh;
       border-left:none; border-top:2px solid var(--sidebar-border);
-      -webkit-overflow-scrolling:touch;
     }
+    #sidebarScroll{
+      -webkit-overflow-scrolling:touch;
+      overscroll-behavior:contain;
+      touch-action:pan-y; /* jawnie: tylko pionowy natywny scroll, nic więcej się o ten gest nie bije */
+    }
+    #panelHandle{
+      display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+      height:20px;touch-action:none;cursor:grab;
+      -webkit-user-select:none;user-select:none;
+    }
+    .panel-grip{width:38px;height:4px;border-radius:3px;background:var(--sidebar-border);}
+    /* Pasek statusu tuż nad panelem jest też uchwytem do zmiany jego
+       wysokości — większy, wygodniejszy cel dotyku niż sam mały uchwyt. */
+    #statusbar{ touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none; }
     .tb-btn span{display:none;}
     .tb-btn{min-width:auto;padding:7px 8px;}
     .tb-label{display:none;}
@@ -259,7 +283,10 @@
         </div>
       </div>
     </div>
-    <div id="sidebar"></div>
+    <div id="sidebar">
+      <div id="panelHandle" aria-hidden="true"><div class="panel-grip"></div></div>
+      <div id="sidebarScroll"></div>
+    </div>
   </div>
 </div>
 <script>
@@ -802,7 +829,7 @@ const CATALOG_DEFS = {
 };
 const CATALOG_ORDER=['IPN','IPE','HEA','HEB','UPN','UPE','T','L'];
 
-let nodes=[];     // {id,x,y, force:{F,angle}|null, moment:{M}|null, support:{angleDeg,ux,uy,rz}|null}
+let nodes=[];     // {id,x,y, force:{mode:'polar',F,angle}|{mode:'components',Fx,Fy}|null, moment:{M}|null, support:{angleDeg,ux,uy,rz}|null}
 let elements=[];  // {id,n1,n2,sectionId,materialId,hingeStart,hingeEnd,q:{qStart,qEnd,angle}|null,thermal:{dTtop,dTbottom}|null}
 let nextNodeId=1, nextElemId=1;
 let defaultSectionId=1, defaultMaterialId=1;
@@ -935,6 +962,17 @@ function triStateCheckAttrs(states){
   return all? 'checked' : (none? '' : 'data-indeterminate="true"');
 }
 
+/* zwraca składowe {Fx,Fy} siły skupionej węzła niezależnie od trybu zapisu
+   (mode:'polar' -> F+angle, mode:'components' -> Fx+Fy wprost) */
+function forceComponents(force){
+  if(!force) return {Fx:0,Fy:0};
+  if(force.mode==='components'){
+    return {Fx:force.Fx||0, Fy:force.Fy||0};
+  }
+  const a=(force.angle||0)*Math.PI/180;
+  return {Fx:(force.F||0)*Math.cos(a), Fy:(force.F||0)*Math.sin(a)};
+}
+
 function invalidateResults(){
   solved=null; diagrams=null; solveWarning=null;
   showDeform=showM=showT=showN=showStress=showReactions=false;
@@ -985,7 +1023,7 @@ function buildSolverModel(){
   });
   const nodalLoads=[];
   nodes.forEach(n=>{
-    if(n.force){ const a=n.force.angle*UNIT.deg; nodalLoads.push({nodeId:n.id, Fx:n.force.F*Math.cos(a), Fy:n.force.F*Math.sin(a), M:0}); }
+    if(n.force){ const {Fx,Fy}=forceComponents(n.force); nodalLoads.push({nodeId:n.id, Fx, Fy, M:0}); }
     if(n.moment){ nodalLoads.push({nodeId:n.id, Fx:0, Fy:0, M:n.moment.M}); }
   });
   return {nodes:nodesArr, elements:elementsArr, supports:supportsArr, nodalLoads};
@@ -1133,15 +1171,15 @@ function mergeNodeInto(sourceId, targetId){
     if(!tgt.force){
       tgt.force = JSON.parse(JSON.stringify(src.force));
     } else {
-      const a1 = (tgt.force.angle || 0) * Math.PI / 180;
-      const a2 = (src.force.angle || 0) * Math.PI / 180;
-      const fx = (tgt.force.F || 0) * Math.cos(a1) + (src.force.F || 0) * Math.cos(a2);
-      const fy = (tgt.force.F || 0) * Math.sin(a1) + (src.force.F || 0) * Math.sin(a2);
+      const c1 = forceComponents(tgt.force);
+      const c2 = forceComponents(src.force);
+      const fx = c1.Fx + c2.Fx;
+      const fy = c1.Fy + c2.Fy;
       const F = Math.hypot(fx, fy);
       if(F > 1e-4){
         let ang = Math.atan2(fy, fx) * 180 / Math.PI;
         if(ang < 0) ang += 360;
-        tgt.force = { F: Math.round(F * 1000) / 1000, angle: Math.round(ang * 100) / 100 };
+        tgt.force = { mode:'polar', F: Math.round(F * 1000) / 1000, angle: Math.round(ang * 100) / 100 };
       } else {
         tgt.force = null;
       }
@@ -1482,15 +1520,35 @@ function drawLoads(){
   nodes.forEach(n=>{
     const p=toScreen(n.x,n.y);
     if(n.force){
-      const a=n.force.angle*Math.PI/180;
-      const sign = (n.force.F||0)>=0 ? 1 : -1;
-      // arrow points TOWARD the node in the load direction (tip at node); negative
-      // magnitude flips the whole arrow to the opposite side, not just its label.
-      const dxs=sign*Math.cos(a), dys=-sign*Math.sin(a); // screen space (y flip)
       const len=46;
-      drawArrow(p.x-dxs*len, p.y-dys*len, p.x-dxs*10, p.y-dys*10, FCOLOR);
-      ctx.fillStyle=FCOLOR; ctx.font='11px '+FONT_MONO; ctx.textAlign='left';
-      ctx.fillText(fmtSmart(n.force.F)+' kN', p.x-dxs*len+4, p.y-dys*len-4);
+      if(n.force.mode==='components'){
+        // rysujemy składową poziomą i pionową osobno; pomijamy zerowe, ujemne
+        // odwracają strzałkę w drugą stronę (analogicznie jak przy trybie kąta).
+        const Fx=n.force.Fx||0, Fy=n.force.Fy||0;
+        if(Math.abs(Fx)>1e-9){
+          const sign = Fx>=0 ? 1 : -1;
+          const dxs=sign, dys=0; // screen space
+          drawArrow(p.x-dxs*len, p.y, p.x-dxs*10, p.y, FCOLOR);
+          ctx.fillStyle=FCOLOR; ctx.font='11px '+FONT_MONO; ctx.textAlign = sign>0?'right':'left';
+          ctx.fillText(fmtSmart(Fx)+' kN', p.x-dxs*len - sign*4, p.y-6);
+        }
+        if(Math.abs(Fy)>1e-9){
+          const sign = Fy>=0 ? 1 : -1;
+          const dxs=0, dys=-sign; // model +y up => screen y flipped
+          drawArrow(p.x, p.y-dys*len, p.x, p.y-dys*10, FCOLOR);
+          ctx.fillStyle=FCOLOR; ctx.font='11px '+FONT_MONO; ctx.textAlign='left';
+          ctx.fillText(fmtSmart(Fy)+' kN', p.x+4, p.y-dys*len - sign*4);
+        }
+      } else {
+        const a=(n.force.angle||0)*Math.PI/180;
+        const sign = (n.force.F||0)>=0 ? 1 : -1;
+        // arrow points TOWARD the node in the load direction (tip at node); negative
+        // magnitude flips the whole arrow to the opposite side, not just its label.
+        const dxs=sign*Math.cos(a), dys=-sign*Math.sin(a); // screen space (y flip)
+        drawArrow(p.x-dxs*len, p.y-dys*len, p.x-dxs*10, p.y-dys*10, FCOLOR);
+        ctx.fillStyle=FCOLOR; ctx.font='11px '+FONT_MONO; ctx.textAlign='left';
+        ctx.fillText(fmtSmart(n.force.F)+' kN', p.x-dxs*len+4, p.y-dys*len-4);
+      }
     }
     if(n.moment){
       drawMomentArc(p.x,p.y,n.moment.M,22,MCOLOR,fmtSmart(n.moment.M)+' kNm');
@@ -1814,7 +1872,7 @@ function drawNodeCoordTip(nodeId){
   ctx.font='11.5px '+FONT_MONO;
   const w=ctx.measureText(label).width;
   const padH=6, h=18;
-  const gap=14; // odstęp od węzła, żeby palec na ekranie dotykowym (zwykle poniżej punktu dotyku) go nie zasłaniał
+  const gap=34; // odstęp od węzła, żeby palec na ekranie dotykowym (zwykle poniżej punktu dotyku) go nie zasłaniał
   const cx=p.x, cy=p.y-gap-h; // wyśrodkowane poziomo, nad węzłem
   const bx=cx-w/2-padH, by=cy;
   ctx.fillStyle=DIMCOLOR;
@@ -2007,7 +2065,7 @@ function svgStroke(html){ return html; }
 
 function buildToolbar(){
   const tb=document.getElementById('toolbar');
-  const showSnapToggle = (mode==='addNode' || mode==='addBar');
+  const showSnapToggle = (mode==='addNode' || mode==='addBar' || mode==='select');
   const showNewNodesToggle = (mode==='addBar');
   const showBoxSelectToggle = (mode==='select');
   tb.innerHTML = `
@@ -2192,14 +2250,14 @@ function loadExample(key){
   } else if(key==='cantilever'){
     const a=createNode(0,0), b=createNode(4,0);
     getNode(a).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'fixed',delta:0}};
-    getNode(b).force={F:15, angle:270};
+    getNode(b).force={mode:'polar', F:15, angle:270};
     getNode(b).moment={M:10};
     createElement(a,b);
   } else if(key==='portal'){
     const a=createNode(0,0), b=createNode(0,3), c=createNode(5,3), d=createNode(5,0);
     getNode(a).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'fixed',delta:0}};
     getNode(d).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'fixed',delta:0}};
-    getNode(b).force={F:12, angle:0};
+    getNode(b).force={mode:'polar', F:12, angle:0};
     createElement(a,b); const beam=createElement(b,c); createElement(c,d);
     getElement(beam).q={qStart:6,qEnd:6,angle:270};
   } else if(key==='gerber'){
@@ -2531,7 +2589,7 @@ let newSecShapeState='rect';         // dla 'ksztalt': rect|circ|pipe|box|ibeam|
 function renderSidebar(){
   checkAndPushHistory();
   pruneSelection();
-  const sb=document.getElementById('sidebar');
+  const sb=document.getElementById('sidebarScroll');
   sb.innerHTML = panelSelection() + panelResults() + panelLibrary();
   sb.querySelectorAll('[data-indeterminate="true"]').forEach(el=>{ el.indeterminate=true; });
 }
@@ -2641,8 +2699,11 @@ function panelNode(nodesArr){
   const multi = nodesArr.length>1;
   const header = multi? `Węzły (${nodesArr.length}): ${nodesArr.map(n=>'W'+n.id).join(', ')}` : `Węzeł W${nodesArr[0].id}`;
   const forceStates = nodesArr.map(n=>!!n.force), noneForce = forceStates.every(v=>!v);
+  const forceModeCommon = commonVal(nodesArr, n=> n.force? (n.force.mode||'polar') : undefined);
   const fVal = commonVal(nodesArr, n=> n.force? n.force.F : undefined);
   const aVal = commonVal(nodesArr, n=> n.force? n.force.angle : undefined);
+  const fxVal = commonVal(nodesArr, n=> n.force? n.force.Fx : undefined);
+  const fyVal = commonVal(nodesArr, n=> n.force? n.force.Fy : undefined);
   const momentStates = nodesArr.map(n=>!!n.moment), noneMoment = momentStates.every(v=>!v);
   const mVal = commonVal(nodesArr, n=> n.moment? n.moment.M : undefined);
   let html = `<div class="panel">
@@ -2670,15 +2731,24 @@ function panelNode(nodesArr){
   <div class="panel">
     <h3>Siła skupiona <input type="checkbox" ${triStateCheckAttrs(forceStates)} onchange="bulkToggleNodeForce(this.checked)"></h3>
     ${!noneForce? `
-      ${pairRow('Wartość',fVal,'0.5','kN',`bulkUpdateNodeForce('F',this.value)`,'Kąt',aVal,'5','°',`bulkUpdateNodeForce('angle',this.value)`)}
-      <div class="btnrow">
-        <button class="mini" onclick="bulkSetForceAngle(270)">↓ w dół</button>
-        <button class="mini" onclick="bulkSetForceAngle(90)">↑ w górę</button>
-        <button class="mini" onclick="bulkSetForceAngle(0)">→ w prawo</button>
-        <button class="mini" onclick="bulkSetForceAngle(180)">← w lewo</button>
-        ${angleNudgeButtons('bulkNudgeForceAngle')}
+      <div class="btnrow" style="margin-bottom:8px;">
+        <button class="mini ${forceModeCommon==='polar'?'on':''}" onclick="bulkSetForceMode('polar')">Wartość i kąt</button>
+        <button class="mini ${forceModeCommon==='components'?'on':''}" onclick="bulkSetForceMode('components')">Składowe H/V</button>
       </div>
-      <div class="muted">Kąt: 0°=w prawo, 90°=w górę (przeciwnie do zegara).</div>
+      ${forceModeCommon==='components'? `
+        ${pairRow('Skł. pozioma',fxVal,'0.5','kN',`bulkUpdateNodeForce('Fx',this.value)`,'Skł. pionowa',fyVal,'0.5','kN',`bulkUpdateNodeForce('Fy',this.value)`)}
+        <div class="muted">Pozioma: dodatnia = w prawo. Pionowa: dodatnia = w górę.</div>
+      ` : forceModeCommon==='polar'? `
+        ${pairRow('Wartość',fVal,'0.5','kN',`bulkUpdateNodeForce('F',this.value)`,'Kąt',aVal,'5','°',`bulkUpdateNodeForce('angle',this.value)`)}
+        <div class="btnrow">
+          <button class="mini" onclick="bulkSetForceAngle(270)">↓ w dół</button>
+          <button class="mini" onclick="bulkSetForceAngle(90)">↑ w górę</button>
+          <button class="mini" onclick="bulkSetForceAngle(0)">→ w prawo</button>
+          <button class="mini" onclick="bulkSetForceAngle(180)">← w lewo</button>
+          ${angleNudgeButtons('bulkNudgeForceAngle')}
+        </div>
+        <div class="muted">Kąt: 0°=w prawo, 90°=w górę (przeciwnie do zegara).</div>
+      ` : `<div class="muted">Różne tryby wśród zaznaczonych węzłów — wybierz jeden z powyższych przycisków, aby ujednolicić.</div>`}
     ` : `<div class="muted">Brak siły w ${multi?'zaznaczonych węzłach':'tym węźle'}.</div>`}
   </div>
   <div class="panel">
@@ -3112,20 +3182,37 @@ function bulkUpdateSupportDir(key,field,val){
   invalidateResults(); renderSidebar(); render();
 }
 function bulkToggleNodeForce(checked){
-  selectedNodes().forEach(n=>{ n.force = checked? (n.force||{F:10,angle:270}) : null; });
+  selectedNodes().forEach(n=>{ n.force = checked? (n.force||{mode:'polar', F:10, angle:270}) : null; });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkSetForceMode(mode){
+  selectedNodes().forEach(n=>{
+    if(!n.force){ n.force={mode:'polar', F:10, angle:270}; }
+    const curMode = n.force.mode||'polar';
+    if(curMode===mode) return;
+    const {Fx,Fy}=forceComponents(n.force);
+    if(mode==='components'){
+      n.force = {mode:'components', Fx:Math.round(Fx*1000)/1000, Fy:Math.round(Fy*1000)/1000};
+    } else {
+      const F=Math.hypot(Fx,Fy);
+      let angle = F>1e-9 ? Math.atan2(Fy,Fx)*180/Math.PI : (n.force.angle||270);
+      if(angle<0) angle+=360;
+      n.force = {mode:'polar', F:Math.round(F*1000)/1000, angle:Math.round(angle*100)/100};
+    }
+  });
   invalidateResults(); renderSidebar(); render();
 }
 function bulkUpdateNodeForce(field,val){
   const v=parseFloat(val)||0;
-  selectedNodes().forEach(n=>{ if(!n.force) n.force={F:10,angle:270}; n.force[field]=v; });
+  selectedNodes().forEach(n=>{ if(!n.force) n.force={mode:'polar', F:10, angle:270}; n.force[field]=v; });
   invalidateResults(); renderSidebar(); render();
 }
 function bulkSetForceAngle(ang){
-  selectedNodes().forEach(n=>{ if(!n.force) n.force={F:10,angle:270}; n.force.angle=ang; });
+  selectedNodes().forEach(n=>{ if(!n.force) n.force={mode:'polar', F:10, angle:270}; n.force.angle=ang; });
   invalidateResults(); renderSidebar(); render();
 }
 function bulkNudgeForceAngle(delta){
-  selectedNodes().forEach(n=>{ if(!n.force) n.force={F:10,angle:270}; n.force.angle=normalizeAngle((n.force.angle||0)+delta); });
+  selectedNodes().forEach(n=>{ if(!n.force) n.force={mode:'polar', F:10, angle:270}; n.force.angle=normalizeAngle((n.force.angle||0)+delta); });
   invalidateResults(); renderSidebar(); render();
 }
 function bulkToggleNodeMoment(checked){
@@ -3676,6 +3763,136 @@ function removeSection(id){
 }
 
 /* =========================================================================
+   MOBILE BOTTOM PANEL — dynamiczna wysokość sterowana przeciąganiem
+   Zmiana wysokości i scrollowanie treści są celowo ROZDZIELONE na dwa różne
+   elementy DOM:
+     - #panelHandle — mały uchwyt u góry panelu. TYLKO on dostaje handlery
+       touch i TYLKO on zmienia sidebarEl.style.height.
+     - #sidebarScroll — cała treść panelu. Nie ma na nim żadnych handlerów
+       touch — scrolluje się w 100% natywnie, przeglądarka sama nim rządzi.
+   Wcześniej oba gesty żyły na jednym elemencie (JS dynamicznie przełączał
+   się między "zmieniaj wysokość" a "pozwól scrollować" i wołał
+   preventDefault() w zależności od pozycji scrolla). To dawało niespójne
+   zachowanie między silnikami:
+     - Firefox: raz podjęta w touchmove decyzja "to nie scroll" (bo padło
+       preventDefault) blokuje natywny scroll do końca CAŁEGO gestu, nawet
+       gdy JS przestaje wołać preventDefault w tym samym dotknięciu — więc
+       scroll ruszał dopiero przy kolejnym, osobnym dotknięciu.
+     - Chrome-based: sidebarEl.style.height zmieniany co klatkę touchmove
+       wymuszał reflow #main → ResizeObserver na #canvasWrap → resizeCanvas()
+       (realokacja bitmapy canvasu + pełny render()) co klatkę — stąd lagi.
+   Rozdzielenie na dwa elementy usuwa ten konflikt u źródła w obu silnikach:
+   scroll treści nigdy nie dotyka wysokości panelu, więc nigdy nie odpala
+   resize'u canvasu ani nie jest niczym blokowany.
+   ========================================================================= */
+function initMobilePanelResize(){
+  const sidebarEl = document.getElementById('sidebar');
+  const handleEl  = document.getElementById('panelHandle');
+  const scrollEl  = document.getElementById('sidebarScroll');
+  const statusbarEl = document.getElementById('statusbar'); // dodatkowy, większy cel do złapania — patrz niżej
+  if(!sidebarEl || !handleEl || !scrollEl) return;
+  const mq = window.matchMedia('(max-width:860px)');
+  const PANEL_MIN = 170;        // px — minimalna wysokość panelu
+  const PANEL_MAX_RATIO = 0.62; // panel nie większy niż 62% wysokości okna
+
+  let panelH = null; // aktualna wysokość panelu w px (null = jeszcze nieustawiona)
+
+  function viewportH(){
+    // visualViewport.height jest wiarygodniejsze niż window.innerHeight, gdy
+    // otwarta jest klawiatura ekranowa — część przeglądarek (np. starsze
+    // silniki oparte na Chromium, w tym niektóre wersje Samsung Internet)
+    // nie zmniejsza window.innerHeight przy pokazaniu klawiatury.
+    return (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  }
+  function maxH(){ return Math.round(viewportH() * PANEL_MAX_RATIO); }
+
+  function applyHeight(h){
+    const clamped = Math.max(PANEL_MIN, Math.min(maxH(), h));
+    panelH = clamped;
+    sidebarEl.style.height = panelH + 'px';
+    return clamped;
+  }
+
+  // --- przeciąganie uchwytu (jedyne miejsce, które zmienia wysokość) ---
+  let dragging = false, anchorY = 0, anchorH = 0;
+
+  function onHandleStart(e){
+    if(!mq.matches || e.touches.length !== 1) return;
+    dragging = true;
+    anchorY = e.touches[0].clientY;
+    anchorH = panelH ?? sidebarEl.getBoundingClientRect().height;
+  }
+  function onHandleMove(e){
+    if(!dragging || e.touches.length !== 1) return;
+    e.preventDefault(); // uchwyt nigdy nic nie scrolluje — bezpiecznie blokujemy domyślkę
+    applyHeight(anchorH - (e.touches[0].clientY - anchorY));
+    // Świadomie NIE dotykamy tu canvasu bezpośrednio — samo napisanie
+    // sidebarEl.style.height (czysty zapis, bez odczytu zaraz potem) jest
+    // tanie. Faktyczny resizeCanvas()+render() dzieje się w ResizeObserver
+    // w init(), zthrottlowany do jednego wywołania na klatkę animacji —
+    // dzięki temu canvas realnie dorysowuje odsłaniany obszar (nie zostaje
+    // pusty), a mimo to nie przerysowujemy go częściej niż ma to sens.
+  }
+  function onHandleEnd(){ dragging = false; }
+
+  handleEl.addEventListener('touchstart', onHandleStart, {passive:true});
+  handleEl.addEventListener('touchmove', onHandleMove, {passive:false});
+  handleEl.addEventListener('touchend', onHandleEnd, {passive:true});
+  handleEl.addEventListener('touchcancel', onHandleEnd, {passive:true});
+
+  // Pasek statusu (nad uchwytem, na dole obszaru rysowania) dostaje dokładnie
+  // te same handlery — to po prostu drugi, dużo większy cel dotyku dla tego
+  // samego gestu zmiany wysokości. Jest statycznym elementem DOM (nie jest
+  // nadpisywany przez innerHTML tak jak treść panelu), więc bezpiecznie
+  // podpinamy się do niego raz, tutaj.
+  if(statusbarEl){
+    statusbarEl.addEventListener('touchstart', onHandleStart, {passive:true});
+    statusbarEl.addEventListener('touchmove', onHandleMove, {passive:false});
+    statusbarEl.addEventListener('touchend', onHandleEnd, {passive:true});
+    statusbarEl.addEventListener('touchcancel', onHandleEnd, {passive:true});
+  }
+
+  function resetForViewport(){
+    if(mq.matches){
+      if(panelH == null) panelH = Math.round(viewportH() * 0.44);
+      applyHeight(panelH);
+    } else {
+      // Desktop: wracamy do layoutu flex sterowanego przez CSS.
+      sidebarEl.style.height = '';
+      panelH = null;
+      dragging = false;
+    }
+  }
+
+  if(mq.addEventListener) mq.addEventListener('change', resetForViewport);
+  else mq.addListener(resetForViewport); // starsze przeglądarki
+  window.addEventListener('resize', ()=>{ if(mq.matches && panelH!=null) applyHeight(panelH); });
+
+  /* ---- Klawiatura ekranowa ----
+     Niektóre mobilne przeglądarki (m.in. Samsung Internet) nie odpalają
+     window 'resize' przy pokazaniu/schowaniu klawiatury — tylko
+     visualViewport 'resize', i to zanim metryki się w pełni ustabilizują
+     po animacji zamykania klawiatury. Bez ponownego przeliczenia wysokości
+     panelu w tym momencie, sidebarEl.style.height zostawał "zamrożony" na
+     wartości sprzed zamknięcia klawiatury i było to widać dopiero jako
+     nagły skok przy kolejnym dotknięciu ekranu. Doklejamy więc przeliczenie
+     zarówno od razu, jak i z małym opóźnieniem (analogicznie do resettle()
+     w init(), które radzi sobie z tym samym rodzajem "osiadania" layoutu). */
+  function reclamp(){
+    if(!mq.matches || panelH==null) return;
+    applyHeight(panelH);
+  }
+  function reclampSoon(){
+    reclamp();
+    setTimeout(reclamp, 350);
+  }
+  if(window.visualViewport) window.visualViewport.addEventListener('resize', reclampSoon);
+  scrollEl.addEventListener('focusout', reclampSoon);
+
+  resetForViewport();
+}
+
+/* =========================================================================
    INIT
    ========================================================================= */
 function init(){
@@ -3705,6 +3922,29 @@ function init(){
   if(window.visualViewport){
     window.visualViewport.addEventListener('resize', ()=>{ resizeCanvas(); });
   }
+
+  // canvasWrap może zmienić rozmiar z wielu powodów niezwiązanych z resize okna
+  // (np. panel mobilny zmienia wysokość przez przeciągnięcie uchwytu) —
+  // ResizeObserver gwarantuje, że bitmapa canvasu zawsze dopasuje się do
+  // faktycznego rozmiaru elementu, zamiast być rozciągana przez CSS
+  // (width:100%;height:100%), co dawało efekt nienaturalnego skalowania
+  // rysunku w pionie.
+  if('ResizeObserver' in window){
+    let roPending=false;
+    const ro = new ResizeObserver(()=>{
+      // Throttlowane do jednego resizeCanvas()+render() na klatkę animacji —
+      // to wystarcza, żeby canvas realnie dorysowywał się w trakcie
+      // przeciągania uchwytu panelu (zamiast zostawiać pusty, nieodświeżony
+      // obszar pod spodem), a jednocześnie nie robimy tego częściej niż ma
+      // to sens (przeglądarka i tak nie namaluje więcej niż raz na klatkę).
+      if(roPending) return;
+      roPending=true;
+      requestAnimationFrame(()=>{ roPending=false; resizeCanvas(); });
+    });
+    ro.observe(document.getElementById('canvasWrap'));
+  }
+
+  initMobilePanelResize();
 }
 window.addEventListener('DOMContentLoaded', init);
 </script>
