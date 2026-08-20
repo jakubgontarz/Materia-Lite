@@ -842,6 +842,7 @@ let mode='select';           // select | addNode | addBar | delete
 let selection={nodeIds:[], elemIds:[]};   // multi-selection: arrays of currently selected node/element ids
 let barStart=null;
 let dragNode=null;           // id of node being dragged
+let dragNodeState=null;      // {nodeId, startPx, startPy, startX, startY, moved}
 let panState=null;           // {startX,startY,startOffX,startOffY}
 let mouseModel={x:0,y:0};
 let hoverNodeId=null, hoverElemId=null;
@@ -1021,10 +1022,33 @@ function forceComponents(force){
   return {Fx:(force.F||0)*Math.cos(a), Fy:(force.F||0)*Math.sin(a)};
 }
 
+function updateRunButton(){
+  const btn=document.getElementById('btnRun');
+  if(!btn) return;
+  if(solved){
+    btn.innerHTML=`${ICONS.back}<span>WRÓĆ</span>`;
+    btn.title='Ukryj wyniki i wróć do edycji modelu (Enter)';
+  } else {
+    btn.innerHTML=`${ICONS.run}<span>OBLICZ</span>`;
+    btn.title='Uruchom obliczenia (Enter)';
+  }
+}
+
+function toggleSolveOrBack(){
+  if(solved){
+    invalidateResults();
+    renderSidebar();
+    render();
+  } else {
+    runAnalysis();
+  }
+}
+
 function invalidateResults(){
   solved=null; diagrams=null; solveWarning=null;
   showDeform=showM=showT=showN=showStress=showReactions=false;
   probe.elId=null;
+  updateRunButton();
 }
 
 /* =========================================================================
@@ -1088,18 +1112,18 @@ function modelBBox(){
 function runAnalysis(){
   if(nodes.length<2 || elements.length<1){
     solveWarning='Dodaj co najmniej dwa węzły i jeden pręt, aby uruchomić obliczenia.';
-    solved=null; diagrams=null; renderSidebar(); render(); return;
+    solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
   }
   const hasAnySupport = nodes.some(n=>n.support && (
     (n.support.ux&&n.support.ux.type!=='free') || (n.support.uy&&n.support.uy.type!=='free') || (n.support.rz&&n.support.rz.type!=='free')));
   if(!hasAnySupport){
     solveWarning='Model nie ma zdefiniowanych podpór — układ jest niestabilny.';
-    solved=null; diagrams=null; renderSidebar(); render(); return;
+    solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
   }
   const model = buildSolverModel();
   let out;
   try{ out = FEM.solveModel(model); }
-  catch(e){ solveWarning='Błąd obliczeń: '+e.message; solved=null; diagrams=null; renderSidebar(); render(); return; }
+  catch(e){ solveWarning='Błąd obliczeń: '+e.message; solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return; }
   solved = out;
   solveWarning = out.singular ? 'Układ może być geometrycznie niestabilny lub niedostatecznie podparty — wyniki mogą być błędne.' : null;
 
@@ -1141,6 +1165,7 @@ function runAnalysis(){
   if(elements.length && probe.elId==null) probe.elId = elements[0].id;
   renderSidebar();
   render();
+  updateRunButton();
 }
 
 /* =========================================================================
@@ -1392,6 +1417,7 @@ function drawHinge(p){
 }
 
 function drawNodes(){
+  const draggedObj = (dragNode!=null) ? getNode(dragNode) : null;
   nodes.forEach(n=>{
     const p=toScreen(n.x,n.y);
     const isSel = isNodeSelected(n.id);
@@ -1404,6 +1430,13 @@ function drawNodes(){
       ctx.fillStyle=getCss('--react-color'); ctx.fill();
       ctx.lineWidth=1.5; ctx.strokeStyle=getCss('--bg-canvas'); ctx.stroke();
       return;
+    }
+    const isSnapTarget = (draggedObj && n.id!==draggedObj.id && Math.hypot(n.x - draggedObj.x, n.y - draggedObj.y) < 1e-4);
+    if(isSnapTarget){
+      ctx.save();
+      ctx.beginPath(); ctx.arc(p.x,p.y,12,0,7);
+      ctx.strokeStyle=getCss('--accent'); ctx.lineWidth=2; ctx.setLineDash([3,2]); ctx.stroke();
+      ctx.restore();
     }
     ctx.beginPath(); ctx.arc(p.x,p.y, isSel?7:(isHov?6.5:5.5),0,7);
     ctx.fillStyle = isSel? getCss('--accent-dark') : (isHov? getCss('--accent') : getCss('--ink'));
@@ -2090,6 +2123,16 @@ function drawScaleBar(){
 /* =========================================================================
    HIT TESTING
    ========================================================================= */
+function findSnapTargetNode(excludeId, px, py, thresholdPx=24){
+  let best=null, bestD=thresholdPx;
+  nodes.forEach(other=>{
+    if(other.id===excludeId) return;
+    const p=toScreen(other.x,other.y);
+    const d=Math.hypot(p.x-px, p.y-py);
+    if(d<bestD){ bestD=d; best=other; }
+  });
+  return best;
+}
 function hitTestNode(px,py){
   let best=null, bestD=12;
   nodes.forEach(n=>{ const p=toScreen(n.x,n.y); const d=Math.hypot(p.x-px,p.y-py); if(d<bestD){bestD=d;best=n.id;} });
@@ -2158,6 +2201,7 @@ const ICONS = {
   bar:'<svg viewBox="0 0 24 24"><circle cx="5" cy="19" r="2.3"/><circle cx="19" cy="5" r="2.3"/><path d="M6.8 17.2L17.2 6.8"/></svg>',
   del:'<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>',
   run:'<svg viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg>',
+  back:'<svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>',
   fit:'<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
   neu:'<svg viewBox="0 0 24 24"><path d="M14 3H6v18h12V7l-4-4zM14 3v4h4"/></svg>',
   ul:'<svg viewBox="0 0 24 24"><path d="M4 9V6a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v1M2 9h20l-2 10H4z"/></svg>',
@@ -2175,6 +2219,7 @@ function buildToolbar(){
   const showSnapToggle = (mode==='addNode' || mode==='addBar' || mode==='select');
   const showNewNodesToggle = (mode==='addBar');
   const showBoxSelectToggle = (mode==='select');
+  const isSolved = !!solved;
   tb.innerHTML = `
     <div class="tb-group">
       <button class="tb-btn" data-mode="select" title="Zaznacz / przesuń (V)">${ICONS.select}<span>Zaznacz</span></button>
@@ -2203,14 +2248,14 @@ function buildToolbar(){
       ${showBoxSelectToggle? `<button class="tb-btn ${boxSelectEnabled?'active':''}" id="boxSelectToggleBtn" title="Zaznaczanie ramką — gdy włączone, przeciągnięcie po pustym miejscu rysuje ramkę zaznaczenia zamiast przewijać widok">${ICONS.boxselect}<span>Ramka</span></button>`:''}
     </div>` : ''}
     <div class="tb-group" style="margin-left:auto;border-right:none;">
-      <button class="tb-btn primary" id="btnRun" title="Uruchom obliczenia (Enter)">${ICONS.run}<span>OBLICZ</span></button>
+      <button class="tb-btn primary" id="btnRun" title="${isSolved?'Ukryj wyniki i wróć do edycji modelu (Enter)':'Uruchom obliczenia (Enter)'}">${isSolved ? ICONS.back : ICONS.run}<span>${isSolved ? 'WRÓĆ' : 'OBLICZ'}</span></button>
     </div>
   `;
   tb.querySelectorAll('[data-mode]').forEach(b=>{
     b.addEventListener('click', ()=>setMode(b.dataset.mode));
   });
   document.getElementById('btnNew').addEventListener('click', newModel);
-  document.getElementById('btnRun').addEventListener('click', runAnalysis);
+  document.getElementById('btnRun').addEventListener('click', toggleSolveOrBack);
   document.getElementById('btnExport').addEventListener('click', exportModel);
   document.getElementById('btnImport').addEventListener('click', ()=>document.getElementById('fileImport').click());
   document.getElementById('fileImport').addEventListener('change', importModelFile);
@@ -2430,7 +2475,22 @@ function handlePointerDown(px,py){
   if(mode==='select'){
     setStatusHint(selectModeHint());
     const nid=hitTestNode(px,py);
-    if(nid!=null){ selection={nodeIds:[nid],elemIds:[]}; dragNode=nid; renderSidebar(); render(); return; }
+    if(nid!=null){
+      const nodeObj = getNode(nid);
+      selection={nodeIds:[nid],elemIds:[]};
+      dragNode=nid;
+      dragNodeState={
+        nodeId: nid,
+        startPx: px,
+        startPy: py,
+        origX: nodeObj ? nodeObj.x : 0,
+        origY: nodeObj ? nodeObj.y : 0,
+        moved: false
+      };
+      renderSidebar();
+      render();
+      return;
+    }
     const eid=hitTestElement(px,py);
     if(eid!=null){
       selection={nodeIds:[],elemIds:[eid]};
@@ -2523,8 +2583,28 @@ function handlePointerMove(px,py){
   if(coordsEl) coordsEl.textContent = `x=${mouseModel.x.toFixed(2)}\u00A0m,  y=${mouseModel.y.toFixed(2)}\u00A0m`;
   if(dragNode!=null){
     const n=getNode(dragNode);
-    n.x=snap(mouseModel.x); n.y=snap(mouseModel.y);
-    invalidateResults();
+    if(n){
+      const applyNodePos = ()=>{
+        const snapTarget = findSnapTargetNode(dragNode, px, py, 24);
+        if(snapTarget){
+          n.x = snapTarget.x;
+          n.y = snapTarget.y;
+        } else {
+          n.x = snap(mouseModel.x);
+          n.y = snap(mouseModel.y);
+        }
+        invalidateResults();
+      };
+      if(!dragNodeState || dragNodeState.moved){
+        applyNodePos();
+      } else {
+        const distPx = Math.hypot(px - dragNodeState.startPx, py - dragNodeState.startPy);
+        if(distPx > 10){ // próg 10px celowego ruchu palcem/kursorem
+          dragNodeState.moved = true;
+          applyNodePos();
+        }
+      }
+    }
     render();
     return;
   }
@@ -2556,10 +2636,14 @@ function handlePointerUp(){
   hoverNodeId=null; hoverElemId=null;
   if(dragNode!=null){
     const draggedId = dragNode;
+    const wasMoved = dragNodeState ? dragNodeState.moved : false;
     dragNode=null;
-    const mergedTargetId = checkAndMergeCoincidentNode(draggedId);
-    if(!mergedTargetId){
-      setStatusHint(selectModeHint());
+    dragNodeState=null;
+    if(wasMoved){
+      const mergedTargetId = checkAndMergeCoincidentNode(draggedId);
+      if(!mergedTargetId){
+        setStatusHint(selectModeHint());
+      }
     }
     renderSidebar(); render();
   }
@@ -2623,7 +2707,7 @@ function onKey(e){
   if(e.key==='v'||e.key==='V') setMode('select');
   if(e.key==='n'||e.key==='N') setMode('addNode');
   if(e.key==='b'||e.key==='B') setMode('addBar');
-  if(e.key==='Enter') runAnalysis();
+  if(e.key==='Enter') toggleSolveOrBack();
 }
 
 /* ---- touch: 1 finger = tap/select/drag/pan (reuses pointer logic), 2 fingers = pinch-zoom ---- */
@@ -2647,7 +2731,7 @@ function onTouchStart(e){
     const p=touchPt(e.touches[0]);
     handlePointerDown(p.x,p.y);
   } else if(e.touches.length>=2){
-    dragNode=null; panState=null; boxSelectState=null;
+    dragNode=null; dragNodeState=null; panState=null; boxSelectState=null;
     const mid=touchMid(e);
     const before=toModel(mid.x,mid.y);
     touchPinch={ startDist:touchDist(e), startScale:view.scale, anchorModel:before };
@@ -2672,7 +2756,7 @@ function onTouchMove(e){
 function onTouchEnd(e){
   e.preventDefault();
   if(e.touches.length===0){ handlePointerUp(); touchPinch=null; }
-  else if(e.touches.length===1){ touchPinch=null; dragNode=null; panState=null; boxSelectState=null; }
+  else if(e.touches.length===1){ touchPinch=null; dragNode=null; dragNodeState=null; panState=null; boxSelectState=null; }
 }
 
 function initEvents(){
