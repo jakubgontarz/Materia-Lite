@@ -2121,7 +2121,7 @@ const ICONS = {
   undo:'<svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2"/></svg>',
   redo:'<svg viewBox="0 0 24 24"><path d="M15 7l5 5-5 5M20 12H9a5 5 0 0 0 0 10h2"/></svg>',
   grid:'<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z M4 9.33h16 M4 14.67h16 M9.33 4v16 M14.67 4v16"/></svg>',
-  gear: '<svg viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37c.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>',book:'<svg viewBox="0 0 24 24"><path d="M4 5c3-1.5 6-1.5 8 0v14c-2-1.5-5-1.5-8 0zM20 5c-3-1.5-6-1.5-8 0v14c2-1.5 5-1.5 8 0z"/></svg>',
+  gear: '<svg viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37c.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>',
   boxselect:'<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1.5" stroke-dasharray="3 2.2"/></svg>',
 };
 function svgStroke(html){ return html; }
@@ -2146,7 +2146,6 @@ function buildToolbar(){
     </div>
     <div class="tb-group">
       <button class="tb-btn" id="btnNew" title="Nowy model">${ICONS.neu}<span>Nowy</span></button>
-      <button class="tb-btn" id="btnExamples" title="Przykłady">${ICONS.book}<span>Przykład</span></button>
       <button class="tb-btn" id="btnImport" title="Importuj JSON">${ICONS.ul}<span>Wczytaj</span></button>
       <button class="tb-btn" id="btnExport" title="Eksportuj JSON">${ICONS.dl}<span>Zapisz</span></button>
       <button class="tb-btn" id="btnUndo" title="Cofnij (Ctrl+Z)" disabled>${ICONS.undo}<span>Cofnij</span></button>
@@ -2171,7 +2170,6 @@ function buildToolbar(){
   document.getElementById('btnExport').addEventListener('click', exportModel);
   document.getElementById('btnImport').addEventListener('click', ()=>document.getElementById('fileImport').click());
   document.getElementById('fileImport').addEventListener('change', importModelFile);
-  document.getElementById('btnExamples').addEventListener('click', (e)=>toggleExamplesMenu(e));
   document.getElementById('btnUndo').addEventListener('click', doUndo);
   document.getElementById('btnRedo').addEventListener('click', doRedo);
   document.getElementById('btnOptions').addEventListener('click', openOptionsModal);
@@ -2280,61 +2278,6 @@ function newModel(){
   clearSelection(); invalidateResults();
   fitView(); setMode('select'); renderSidebar(); render();
 }
-
-/* =========================================================================
-   EXAMPLES
-   ========================================================================= */
-function toggleExamplesMenu(e){
-  e.stopPropagation();
-  let old=document.getElementById('exMenu'); if(old){ old.remove(); return; }
-  const btn=e.currentTarget; const r=btn.getBoundingClientRect();
-  const menu=document.createElement('div'); menu.id='exMenu';
-  menu.style.cssText=`position:fixed;top:${r.bottom+4}px;left:${r.left}px;background:#1b2430;border:1px solid #3d4c5e;
-    border-radius:8px;padding:4px;z-index:100;box-shadow:0 8px 24px #0006;min-width:210px;`;
-  const items=[['Belka wolnopodparta z obc. ciągłym','ssbeam'],['Wspornik z siłą i momentem','cantilever'],['Rama portalowa','portal'],['Belka Gerbera (z przegubem)','gerber']];
-  menu.innerHTML = items.map(([label,key])=>`<div class="exitem" data-ex="${key}" style="padding:8px 10px;color:#e8edf3;font-size:12px;cursor:pointer;border-radius:5px;">${label}</div>`).join('');
-  document.body.appendChild(menu);
-  menu.querySelectorAll('.exitem').forEach(it=>{
-    it.addEventListener('mouseenter',()=>it.style.background='#2a3644');
-    it.addEventListener('mouseleave',()=>it.style.background='transparent');
-    it.addEventListener('click',()=>{ loadExample(it.dataset.ex); menu.remove(); });
-  });
-  setTimeout(()=>document.addEventListener('click', function h(){ const m=document.getElementById('exMenu'); if(m) m.remove(); document.removeEventListener('click',h); }),0);
-}
-
-function loadExample(key){
-  newModelSilent();
-  if(key==='ssbeam'){
-    const a=createNode(0,0), b=createNode(6,0);
-    getNode(a).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'free'}};
-    getNode(b).support={angleDeg:0, ux:{type:'free'}, uy:{type:'fixed',delta:0}, rz:{type:'free'}};
-    const e1=createElement(a,b);
-    getElement(e1).q={qStart:10,qEnd:10,angle:270};
-  } else if(key==='cantilever'){
-    const a=createNode(0,0), b=createNode(4,0);
-    getNode(a).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'fixed',delta:0}};
-    getNode(b).force={mode:'polar', F:15, angle:270};
-    getNode(b).moment={M:10};
-    createElement(a,b);
-  } else if(key==='portal'){
-    const a=createNode(0,0), b=createNode(0,3), c=createNode(5,3), d=createNode(5,0);
-    getNode(a).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'fixed',delta:0}};
-    getNode(d).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'fixed',delta:0}};
-    getNode(b).force={mode:'polar', F:12, angle:0};
-    createElement(a,b); const beam=createElement(b,c); createElement(c,d);
-    getElement(beam).q={qStart:6,qEnd:6,angle:270};
-  } else if(key==='gerber'){
-    const a=createNode(0,0), b=createNode(4,0), c=createNode(8,0);
-    getNode(a).support={angleDeg:0, ux:{type:'fixed',delta:0}, uy:{type:'fixed',delta:0}, rz:{type:'free'}};
-    getNode(b).support={angleDeg:0, ux:{type:'free'}, uy:{type:'fixed',delta:0}, rz:{type:'free'}};
-    getNode(c).support={angleDeg:0, ux:{type:'free'}, uy:{type:'fixed',delta:0}, rz:{type:'free'}};
-    const e1=createElement(a,b); const e2=createElement(b,c);
-    getElement(e1).hingeEnd=true; getElement(e2).hingeStart=true;
-    getElement(e1).q={qStart:8,qEnd:8,angle:270}; getElement(e2).q={qStart:8,qEnd:8,angle:270};
-  }
-  fitView(); clearSelection(); renderSidebar(); render();
-}
-function newModelSilent(){ nodes=[]; elements=[]; nextNodeId=1; nextElemId=1; lastPlacedNodeId=null; lastDrawnElemId=null; invalidateResults(); }
 
 /* =========================================================================
    EXPORT / IMPORT
