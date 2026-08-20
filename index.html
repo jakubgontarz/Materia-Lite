@@ -29,6 +29,7 @@
     --s-color:#9333ea;
     --def-color:#7c3aed;
     --react-color:#d97706;
+    --mass-color:#0284c7;
     --surface:#ffffff;
     --surface-2:#f8fafc;
     --surface-border:#e2e8f0;
@@ -49,6 +50,7 @@
     --grid-line:#1b2634;
     --grid-line-major:#28384a;
     --accent-soft:#1e3a5f;
+    --mass-color:#38bdf8;
     --sidebar-bg:#141b26;
     --sidebar-border:#26333f;
     --text:#e7edf5;
@@ -831,7 +833,7 @@ const CATALOG_DEFS = {
 };
 const CATALOG_ORDER=['IPN','IPE','HEA','HEB','UPN','UPE','T','L'];
 
-let nodes=[];     // {id,x,y, force:{mode:'polar',F,angle}|{mode:'components',Fx,Fy}|null, moment:{M}|null, support:{angleDeg,ux,uy,rz}|null}
+let nodes=[];     // {id,x,y, force:{mode:'polar',F,angle}|{mode:'components',Fx,Fy}|null, moment:{M}|null, support:{angleDeg,ux,uy,rz}|null, mass:{mx,my,Im}|null}
 let elements=[];  // {id,n1,n2,sectionId,materialId,hingeStart,hingeEnd,q:{qStart,qEnd,angle}|null,thermal:{dTtop,dTbottom}|null}
 let nextNodeId=1, nextElemId=1;
 let defaultSectionId=1, defaultMaterialId=1;
@@ -1134,7 +1136,7 @@ function createNode(x,y,skipSnap){
   const id = nextNodeId++;
   const px = skipSnap ? Math.round(x*1e6)/1e6 : snap(x);
   const py = skipSnap ? Math.round(y*1e6)/1e6 : snap(y);
-  nodes.push({id, x:px, y:py, force:null, moment:null, support:null});
+  nodes.push({id, x:px, y:py, force:null, moment:null, support:null, mass:null});
   return id;
 }
 function createElement(n1,n2){
@@ -1196,6 +1198,24 @@ function mergeNodeInto(sourceId, targetId){
         tgt.moment = { M: Math.round(newM * 1000) / 1000 };
       } else {
         tgt.moment = null;
+      }
+    }
+  }
+  if(src.mass){
+    if(!tgt.mass){
+      tgt.mass = JSON.parse(JSON.stringify(src.mass));
+    } else {
+      const newMx = (tgt.mass.mx || 0) + (src.mass.mx || 0);
+      const newMy = (tgt.mass.my || 0) + (src.mass.my || 0);
+      const newIm = (tgt.mass.Im || 0) + (src.mass.Im || 0);
+      if(Math.abs(newMx) > 1e-6 || Math.abs(newMy) > 1e-6 || Math.abs(newIm) > 1e-6){
+        tgt.mass = {
+          mx: Math.round(newMx * 1000) / 1000,
+          my: Math.round(newMy * 1000) / 1000,
+          Im: Math.round(newIm * 1000) / 1000
+        };
+      } else {
+        tgt.mass = null;
       }
     }
   }
@@ -1417,10 +1437,7 @@ function drawSupports(){
       ctx.beginPath(); ctx.arc(S+3, 0, 2.5, 0, 7); ctx.stroke();
       ctx.beginPath(); ctx.arc(0, -S-3, 2.5, 0, 7); ctx.stroke();
       ctx.beginPath(); ctx.arc(0, S+3, 2.5, 0, 7); ctx.stroke();    
-    } else {        
-      // generic custom combination
-      drawGenericSupport(sp,S);
-    }
+    } else { }
     // spring indicators overlay
     if(ux==='spring') drawSpringTick(-S-6,0,false);
     if(uy==='spring') drawSpringTick(0,S+3,true);
@@ -1468,16 +1485,6 @@ function drawRotationalSpring(x, y, rMax) {
   ctx.restore();
 }
 
-function drawGenericSupport(sp,S){
-  ctx.beginPath(); ctx.rect(-6,-6,12,12); ctx.fillStyle='#e2e8f0'; ctx.fill(); ctx.stroke();
-  ctx.font='8px '+FONT_MONO; ctx.fillStyle=getCss('--ink'); ctx.textAlign='center';
-  const labels=[];
-  if(dirType(sp.ux)!=='free') labels.push('H');
-  if(dirType(sp.uy)!=='free') labels.push('V');
-  if(dirType(sp.rz)!=='free') labels.push('M');
-  ctx.fillText(labels.join(''), 0, 22);
-}
-
 /* ---- loads ---- */
 function drawArrow(fromX,fromY,toX,toY,color){
   ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=2.2;
@@ -1519,8 +1526,61 @@ function drawMomentArc(cx,cy,M,r,color,label,offsetDeg){
 
 function drawLoads(){
   const FCOLOR='#dc2626', MCOLOR='#dc2626', QCOLOR='#0891b2', TCOLOR='#be185d';
+  const MASS_COLOR = getCss('--mass-color') || '#0284c7';
   nodes.forEach(n=>{
     const p=toScreen(n.x,n.y);
+    if(n.mass){
+      const mx = n.mass.mx || 0, my = n.mass.my || 0, Im = n.mass.Im || 0;
+      if(Math.abs(mx) > 1e-6 || Math.abs(my) > 1e-6 || Math.abs(Im) > 1e-6){
+        ctx.save();
+        // Kółeczko w węźle symbolizujące masę skupioną
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 11, 0, 2*Math.PI);
+        ctx.strokeStyle = MASS_COLOR;
+        ctx.lineWidth = 2;
+        ctx.fillStyle = MASS_COLOR + '22';
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 14, 0, 2*Math.PI);
+        ctx.strokeStyle = MASS_COLOR + '66';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([3, 2]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Etykiety z wartościami mas
+        const labels = [];
+        if(Math.abs(mx - my) < 1e-6 && Math.abs(mx) > 1e-6 && Math.abs(Im) < 1e-6){
+          labels.push(`m=${fmtSmart(mx)} kg`);
+        } else {
+          if(Math.abs(mx) > 1e-6) labels.push(`m_x=${fmtSmart(mx)} kg`);
+          if(Math.abs(my) > 1e-6) labels.push(`m_y=${fmtSmart(my)} kg`);
+          if(Math.abs(Im) > 1e-6) labels.push(`I_m=${fmtSmart(Im)} kg·m²`);
+        }
+
+        if(labels.length > 0){
+          ctx.font = '10px ' + FONT_MONO;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          const startX = p.x + 18;
+          const lineHeight = 13;
+          const totalH = labels.length * lineHeight;
+          const startY = p.y - (totalH / 2) + (lineHeight / 2);
+
+          labels.forEach((lbl, i) => {
+            const curY = startY + i * lineHeight;
+            const w = ctx.measureText(lbl).width;
+            ctx.fillStyle = getCss('--badge-bg');
+            ctx.fillRect(startX - 2, curY - 6, w + 4, 12);
+            ctx.fillStyle = MASS_COLOR;
+            ctx.fillText(lbl, startX, curY);
+          });
+        }
+        ctx.restore();
+      }
+    }
     if(n.force){
       const len=46;
       if(n.force.mode==='components'){
@@ -2279,12 +2339,71 @@ function newModelSilent(){ nodes=[]; elements=[]; nextNodeId=1; nextElemId=1; la
 /* =========================================================================
    EXPORT / IMPORT
    ========================================================================= */
-function exportModel(){
+let currentModelFileName = 'model-mes-2d';
+
+function openExportModal(){
+  closeExportModal();
+  const overlay=document.createElement('div');
+  overlay.id='exportOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:#0f172a99;z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML=`
+    <div id="exportCard" style="background:var(--sidebar-bg);color:var(--text);border-radius:12px;max-width:380px;width:100%;box-shadow:0 20px 60px #0008;">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--sidebar-border);">
+        <h2 style="margin:0;font-size:14.5px;">Zapisz model do pliku</h2>
+        <button id="exportCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-dim);line-height:1;padding:4px;">✕</button>
+      </div>
+      <div style="padding:16px 18px;font-size:12.5px;">
+        <div class="row" style="margin-bottom:12px;">
+          <label style="min-width:85px;">Nazwa pliku</label>
+          <input type="text" id="exportFileNameInput" value="${currentModelFileName.replace(/"/g, '&quot;')}" style="flex:1;" autofocus>
+          <span class="unit" style="width:auto;padding-left:4px;">.json</span>
+        </div>
+        <div class="muted" style="margin-bottom:14px;">Plik zostanie pobrany w formacie JSON z pełną geometrią, profilami, podporami i obciążeniami.</div>
+        <div class="btnrow" style="justify-content:flex-end;">
+          <button class="mini" id="exportCancelBtn">Anuluj</button>
+          <button class="mini on" id="exportConfirmBtn">Pobierz plik</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',(e)=>{ if(e.target===overlay) closeExportModal(); });
+  document.getElementById('exportCloseBtn').addEventListener('click', closeExportModal);
+  document.getElementById('exportCancelBtn').addEventListener('click', closeExportModal);
+  document.getElementById('exportConfirmBtn').addEventListener('click', confirmExport);
+  const inp=document.getElementById('exportFileNameInput');
+  if(inp){
+    inp.focus();
+    inp.select();
+    inp.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){ e.preventDefault(); confirmExport(); }
+      if(e.key==='Escape'){ e.preventDefault(); closeExportModal(); }
+    });
+  }
+}
+function closeExportModal(){ const o=document.getElementById('exportOverlay'); if(o) o.remove(); }
+
+function confirmExport(){
+  const inp=document.getElementById('exportFileNameInput');
+  let rawName = inp ? (inp.value.trim() || 'model-mes-2d') : 'model-mes-2d';
+  // usunięcie ewentualnego podwójnego rozszerzenia .json wpisanego przez użytkownika
+  if(rawName.toLowerCase().endsWith('.json')){
+    rawName = rawName.slice(0, -5);
+  }
+  rawName = rawName || 'model-mes-2d';
+  currentModelFileName = rawName; // zapamiętanie wpisanej nazwy na przyszłość
+  const fileName = currentModelFileName + '.json';
+  closeExportModal();
+
   const data={nodes,elements,materials,sections,nextNodeId,nextElemId,nextMatId,nextSecId,defaultSectionId,defaultMaterialId};
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download='model-mes-2d.json'; a.click();
+  const a=document.createElement('a'); a.href=url; a.download=fileName; a.click();
   URL.revokeObjectURL(url);
+  setStatusHint(`Pobrano plik: ${fileName}`);
+}
+
+function exportModel(){
+  openExportModal();
 }
 function importModelFile(e){
   const file=e.target.files[0]; if(!file) return;
@@ -2297,6 +2416,9 @@ function importModelFile(e){
       nextNodeId=data.nextNodeId||uid(nodes); nextElemId=data.nextElemId||uid(elements);
       nextMatId=data.nextMatId||uid(materials); nextSecId=data.nextSecId||uid(sections);
       defaultSectionId=data.defaultSectionId||sections[0].id; defaultMaterialId=data.defaultMaterialId||materials[0].id;
+      if(file.name){
+        currentModelFileName = file.name.replace(/\.json$/i, '') || 'model-mes-2d';
+      }
       invalidateResults(); clearSelection();
       fitView(); buildToolbar(); renderSidebar(); render();
     }catch(err){ setStatusHint('Błąd wczytywania pliku: '+err.message); }
@@ -2497,6 +2619,7 @@ function onKey(e){
   if((e.ctrlKey||e.metaKey) && !e.shiftKey && (e.key==='z'||e.key==='Z')){ e.preventDefault(); doUndo(); return; }
   if((e.ctrlKey||e.metaKey) && ((e.key==='y'||e.key==='Y') || (e.shiftKey && (e.key==='z'||e.key==='Z')))){ e.preventDefault(); doRedo(); return; }
   if(e.key==='Escape'){
+    if(document.getElementById('exportOverlay')){ closeExportModal(); return; }
     if(document.getElementById('optionsOverlay')){ closeOptionsModal(); return; }
     setMode('select'); return;
   }
@@ -2709,6 +2832,10 @@ function panelNode(nodesArr){
   const fyVal = commonVal(nodesArr, n=> n.force? n.force.Fy : undefined);
   const momentStates = nodesArr.map(n=>!!n.moment), noneMoment = momentStates.every(v=>!v);
   const mVal = commonVal(nodesArr, n=> n.moment? n.moment.M : undefined);
+  const massStates = nodesArr.map(n=>!!n.mass), noneMass = massStates.every(v=>!v);
+  const mxVal = commonVal(nodesArr, n=> n.mass? n.mass.mx : undefined);
+  const myVal = commonVal(nodesArr, n=> n.mass? n.mass.my : undefined);
+  const imVal = commonVal(nodesArr, n=> n.mass? n.mass.Im : undefined);
   let html = `<div class="panel">
     <h3>${header}</h3>
     ${!multi? pairRow('X',nodesArr[0].x,'0.1','m',`updateNodeCoordSel('x',this.value)`,'Y',nodesArr[0].y,'0.1','m',`updateNodeCoordSel('y',this.value)`) : '<div class="muted">Aby edytować współrzędne X/Y, zaznacz pojedynczy węzeł.</div>'}
@@ -2760,6 +2887,17 @@ function panelNode(nodesArr){
       <div class="row"><label>Wartość</label><input type="number" step="0.5" ${numInputAttrs(mVal)} onchange="bulkUpdateNodeMoment(this.value)"><span class="unit">kNm</span></div>
       <div class="muted">Wartość dodatnia = przeciwnie do ruchu wskazówek zegara.</div>
     ` : `<div class="muted">Brak momentu w ${multi?'zaznaczonych węzłach':'tym węźle'}.</div>`}
+  </div>
+  <div class="panel">
+    <h3>Masa skupiona <input type="checkbox" ${triStateCheckAttrs(massStates)} onchange="bulkToggleNodeMass(this.checked)"></h3>
+    ${!noneMass? `
+      ${pairRow('Masa m_x',mxVal,'10','kg',`bulkUpdateNodeMass('mx',this.value)`,'Masa m_y',myVal,'10','kg',`bulkUpdateNodeMass('my',this.value)`)}
+      <div class="row"><label>Obrót I_m</label><input type="number" step="10" ${numInputAttrs(imVal)} onchange="bulkUpdateNodeMass('Im',this.value)"><span class="unit">kg·m²</span></div>
+      <div class="btnrow">
+        <button class="mini" onclick="bulkSetEqualMass()">Ustaw m_x = m_y</button>
+      </div>
+      <div class="muted">Masy skupione na kierunku poziomym (m_x), pionowym (m_y) oraz moment bezwładności masy na obrocie (I_m).</div>
+    ` : `<div class="muted">Brak masy skupionej w ${multi?'zaznaczonych węzłach':'tym węźle'}.</div>`}
   </div>`;
   return html;
 }
@@ -3225,6 +3363,27 @@ function bulkToggleNodeMoment(checked){
 function bulkUpdateNodeMoment(val){
   const v=parseFloat(val)||0;
   selectedNodes().forEach(n=>{ if(!n.moment) n.moment={M:10}; n.moment.M=v; });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkToggleNodeMass(checked){
+  selectedNodes().forEach(n=>{ n.mass = checked? (n.mass||{mx:1000,my:1000,Im:0}) : null; });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkUpdateNodeMass(field,val){
+  const v=parseFloat(val)||0;
+  selectedNodes().forEach(n=>{
+    if(!n.mass) n.mass={mx:0,my:0,Im:0};
+    n.mass[field]=v;
+  });
+  invalidateResults(); renderSidebar(); render();
+}
+function bulkSetEqualMass(){
+  selectedNodes().forEach(n=>{
+    if(!n.mass) n.mass={mx:1000,my:1000,Im:0};
+    const avg = n.mass.mx || n.mass.my || 1000;
+    n.mass.mx = avg;
+    n.mass.my = avg;
+  });
   invalidateResults(); renderSidebar(); render();
 }
 
