@@ -1370,7 +1370,209 @@ function solveModal(model, maxModes=4, options={}){
   };
 }
 
-window.FEM = { solveModel, solveStability, solveModal, pointResults };
+function solveHarmonic(model, freqHz=1.0, options={}){
+  const omega = 2 * Math.PI * Math.max(0, freqHz);
+  const omega2 = omega * omega;
+  const nodes = model.nodes;
+  const elements = model.elements;
+  const nDof = 3 * nodes.length;
+  const nodeIndex = {};
+  nodes.forEach((n, i) => { nodeIndex[n.id] = i; });
+
+  const includeElemMass = options.includeElementMass !== false;
+  const massMatrixType = options.massMatrixType || 'consistent';
+
+  // 1. Build element data, stiffness, mass and equivalent nodal load vectors
+  const elemData = elements.map(el => {
+    const n1 = nodes.find(n => n.id === el.n1);
+    const n2 = nodes.find(n => n.id === el.n2);
+    const dx = n2.x - n1.x, dy = n2.y - n1.y;
+    const L = Math.hypot(dx, dy) || 1e-6;
+    const c = dx / L, s = dy / L;
+
+    const kFull = localStiffness(el.E, el.A, el.I, L);
+    let fFull = zerosVec(6);
+    if(el.qStart != null){
+      const fq = distributedLoadLocalVector(el.qStart, el.qEnd, el.qAngle, c, s, L);
+      fFull = fFull.map((v, i) => v + fq[i]);
+    }
+    if(el.selfWeightQ){
+      const fsw = distributedLoadLocalVector(el.selfWeightQ, el.selfWeightQ, 270, c, s, L);
+      fFull = fFull.map((v, i) => v + fsw[i]);
+    }
+    if(el.dTtop != null){
+      const cTopFb = (el.cTop != null) ? el.cTop : (el.h || 0) / 2;
+      const cBotFb = (el.cBot != null) ? el.cBot : (el.h || 0) / 2;
+      const ft = thermalLocalVector(el.E, el.A, el.I, el.alpha, cTopFb, cBotFb, el.dTtop, el.dTbottom);
+      fFull = fFull.map((v, i) => v + ft[i]);
+    }
+    if(el.hingeStart && el.momentHingeStart){ fFull[2] += el.momentHingeStart; }
+    if(el.hingeEnd && el.momentHingeEnd){ fFull[5] += el.momentHingeEnd; }
+
+    const condIdx = [];
+    if(el.hingeStart) condIdx.push(2);
+    if(el.hingeEnd) condIdx.push(5);
+
+    const { k: kCond, f: fCond } = condense(kFull, fFull, condIdx);
+    const T = [[c,s,0,0,0,0],[-s,c,0,0,0,0],[0,0,1,0,0,0],[0,0,0,c,s,0],[0,0,0,-s,c,0],[0,0,0,0,0,1]];
+    const Tt = transpose(T);
+    const kGlobal = matMul(matMul(Tt, kCond), T);
+    const fGlobal = matVec(Tt, fCond);
+
+    const dofMap = [
+      3 * nodeIndex[el.n1] + 0, 3 * nodeIndex[el.n1] + 1, 3 * nodeIndex[el.n1] + 2,
+      3 * nodeIndex[el.n2] + 0, 3 * nodeIndex[el.n2] + 1, 3 * nodeIndex[el.n2] + 2
+    ];
+
+    // Element mass
+    const dens = (el.density != null) ? el.density : 7850;
+    const Area = (el.A_real != null) ? el.A_real : el.A;
+    const mTotal = includeElemMass ? (dens * Area * L / 1000) : 0;
+
+    let mGlobal = zerosMat(6, 6);
+    if(mTotal > 1e-15){
+      const mLocal = (massMatrixType === 'lumped') ? localLumpedMass(mTotal, L) : localConsistentMass(mTotal, L);
+      const mCond = condenseKg(mLocal, kFull, condIdx);
+      mGlobal = matMul(matMul(Tt, mCond), T);
+    }
+
+    return { el, n1, n2, L, c, s, kFull, fFull, condIdx, kCond, fCond, kGlobal, mGlobal, fGlobal, dofMap, mTotal };
+  });
+
+  let K = zerosMat(nDof, nDof);
+  let M = zerosMat(nDof, nDof);
+  let F = zerosVec(nDof);
+
+  elemData.forEach(ed => {
+    for(let i = 0; i < 6; i++){
+      F[ed.dofMap[i]] += ed.fGlobal[i];
+      for(let j = 0; j < 6; j++){
+        K[ed.dofMap[i]][ed.dofMap[j]] += ed.kGlobal[i][j];
+        M[ed.dofMap[i]][ed.dofMap[j]] += ed.mGlobal[i][j];
+      }
+    }
+  });
+
+  // Nodal loads
+  (model.nodalLoads || []).forEach(nl => {
+    const idx = nodeIndex[nl.nodeId];
+    if(nl.Fx) F[3*idx + 0] += nl.Fx;
+    if(nl.Fy) F[3*idx + 1] += nl.Fy;
+    if(nl.M) F[3*idx + 2] += nl.M;
+  });
+
+  // Nodal lumped masses
+  nodes.forEach((n, i) => {
+    if(n.mass){
+      const mx = (n.mass.mx || 0) / 1000;
+      const my = (n.mass.my || 0) / 1000;
+      const Im = (n.mass.Im || 0) / 1000;
+      if(mx > 0) M[3*i + 0][3*i + 0] += mx;
+      if(my > 0) M[3*i + 1][3*i + 1] += my;
+      if(Im > 0) M[3*i + 2][3*i + 2] += Im;
+    }
+  });
+
+  // 2. Form dynamic stiffness matrix: Kdyn = K - omega^2 * M
+  let Kdyn = zerosMat(nDof, nDof);
+  for(let i = 0; i < nDof; i++){
+    for(let j = 0; j < nDof; j++){
+      Kdyn[i][j] = K[i][j] - omega2 * M[i][j];
+    }
+  }
+
+  // 3. Support coordinate rotation
+  const Lambda = zerosMat(nDof, nDof);
+  for(let i = 0; i < nDof; i++) Lambda[i][i] = 1;
+  const supportMap = {};
+  (model.supports || []).forEach(sp => { supportMap[sp.nodeId] = sp; });
+
+  nodes.forEach((n, i) => {
+    const sp = supportMap[n.id];
+    if(sp && sp.angleDeg){
+      const a = sp.angleDeg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+      const iu = 3*i, iv = 3*i + 1;
+      Lambda[iu][iu] = c; Lambda[iu][iv] = -s; Lambda[iv][iu] = s; Lambda[iv][iv] = c;
+    }
+  });
+
+  const LambdaT = transpose(Lambda);
+  let Kdyn_p = matMul(matMul(LambdaT, Kdyn), Lambda);
+  let Fp = matVec(LambdaT, F);
+
+  // 4. Boundary conditions
+  const isFixed = new Array(nDof).fill(false);
+  const fixedValue = new Array(nDof).fill(0);
+  const springInfo = {};
+  nodes.forEach((n, i) => {
+    const sp = supportMap[n.id]; if(!sp) return;
+    const dirs = [{ c: sp.ux, dof: 3*i + 0 }, { c: sp.uy, dof: 3*i + 1 }, { c: sp.rz, dof: 3*i + 2 }];
+    dirs.forEach(({ c, dof }) => {
+      if(!c || c.type === 'free') return;
+      if(c.type === 'fixed'){ isFixed[dof] = true; fixedValue[dof] = c.delta || 0; }
+      else if(c.type === 'spring'){ Kdyn_p[dof][dof] += c.k; Fp[dof] += c.k * (c.delta || 0); springInfo[dof] = { k: c.k, delta: c.delta || 0 }; }
+    });
+  });
+
+  let maxDiag = 0;
+  for(let i = 0; i < nDof; i++) maxDiag = Math.max(maxDiag, Math.abs(Kdyn_p[i][i]));
+  const floatTol = Math.max(maxDiag, 1) * 1e-9;
+  for(let i = 0; i < nDof; i++){
+    if(!isFixed[i] && Math.abs(Kdyn_p[i][i]) < floatTol){ isFixed[i] = true; fixedValue[i] = 0; }
+  }
+
+  const freeIdx = [], fixedIdx = [];
+  for(let i = 0; i < nDof; i++){ if(isFixed[i]) fixedIdx.push(i); else freeIdx.push(i); }
+
+  const Kff = freeIdx.map(i => freeIdx.map(j => Kdyn_p[i][j]));
+  const Kfc = freeIdx.map(i => fixedIdx.map(j => Kdyn_p[i][j]));
+  const Uc = fixedIdx.map(i => fixedValue[i]);
+  const Ff = freeIdx.map(i => Fp[i]);
+  const rhs = Ff.map((val, i) => val - matVec([Kfc[i]], Uc)[0]);
+
+  let singular = false;
+  const solvedSys = freeIdx.length > 0 ? solveLinSys(Kff, rhs) : { x: [], singular: false };
+  const Uf = solvedSys.x;
+  singular = solvedSys.singular;
+
+  const Dp = zerosVec(nDof);
+  freeIdx.forEach((gi, i) => { Dp[gi] = Uf[i]; });
+  fixedIdx.forEach((gi, i) => { Dp[gi] = Uc[i]; });
+
+  // Dynamic reaction amplitudes (from Kdyn * D - F)
+  const Rp = matVec(Kdyn_p, Dp).map((v, i) => v - Fp[i]);
+  Object.keys(springInfo).forEach(dofStr => {
+    const dof = +dofStr;
+    const { k, delta } = springInfo[dof];
+    Rp[dof] = k * (delta - Dp[dof]);
+  });
+
+  const D = matVec(Lambda, Dp);
+  const Rglobal = matVec(Lambda, Rp);
+
+  const results = elemData.map(ed => {
+    const dg = ed.dofMap.map(i => D[i]);
+    const T = [[ed.c,ed.s,0,0,0,0],[-ed.s,ed.c,0,0,0,0],[0,0,1,0,0,0],
+               [0,0,0,ed.c,ed.s,0],[0,0,0,-ed.s,ed.c,0],[0,0,0,0,0,1]];
+    const dLocalRaw = matVec(T, dg);
+    const dLocal = backSubstitute(ed.kFull, ed.fFull, dLocalRaw, ed.condIdx);
+    const Fend = matVec(ed.kFull, dLocal).map((v, i) => v - ed.fFull[i]);
+    return { el: ed.el, L: ed.L, c: ed.c, s: ed.s, dLocal, Fend };
+  });
+
+  return {
+    D,
+    Rglobal,
+    results,
+    elemData,
+    nodeIndex,
+    singular,
+    freqHz,
+    omega
+  };
+}
+
+window.FEM = { solveModel, solveStability, solveModal, solveHarmonic, pointResults };
 })();
 
 function zerosMat(r,c){return Array.from({length:r},()=>new Array(c).fill(0));}
@@ -1880,6 +2082,10 @@ function runAnalysis(){
     runModalAnalysis();
     return;
   }
+  if(anType === 'harmonic'){
+    runHarmonicAnalysis();
+    return;
+  }
   runLinearStaticAnalysis();
 }
 
@@ -2182,6 +2388,84 @@ function runModalAnalysis(){
   render();
   updateRunButton();
   setStatusHint(`Obliczono drgania własne: ${out.modes.length} ${out.modes.length === 1 ? 'forma drgań' : 'formy drgań'} (Mod 1: f = ${fmtSmart(out.modes[0].f, 3)} Hz, T = ${fmtSmart(out.modes[0].T, 4)} s).`);
+}
+
+function runHarmonicAnalysis(){
+  if(nodes.length < 2 || elements.length < 1){
+    solveWarning = 'Dodaj co najmniej dwa węzły i jeden pręt, aby uruchomić obliczenia.';
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+  const hasAnySupport = nodes.some(n => n.support && (
+    (n.support.ux && n.support.ux.type !== 'free') || (n.support.uy && n.support.uy.type !== 'free') || (n.support.rz && n.support.rz.type !== 'free')));
+  if(!hasAnySupport){
+    solveWarning = 'Model nie ma zdefiniowanych podpór — układ jest niestabilny.';
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  const model = buildSolverModel();
+  const freqHz = (analysisSettings && analysisSettings.params && analysisSettings.params.harmonicFreq != null) ?
+                 Math.max(0, parseFloat(analysisSettings.params.harmonicFreq) || 0) : 5.0;
+  const includeElementMass = !(analysisSettings && analysisSettings.params && analysisSettings.params.includeElementMass === false);
+
+  let out;
+  try{
+    out = FEM.solveHarmonic(model, freqHz, { includeElementMass });
+  } catch(e){
+    solveWarning = 'Błąd analizy harmonicznej: ' + e.message;
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  solved = {
+    type: 'harmonic',
+    freqHz: out.freqHz,
+    omega: out.omega,
+    D: out.D,
+    Rglobal: out.Rglobal,
+    results: out.results,
+    elemData: out.elemData,
+    nodeIndex: out.nodeIndex,
+    singular: out.singular
+  };
+
+  solveWarning = out.singular ? 'Wykryto osobliwość lub rezonans dokładny (brak tłumienia) — układ dynamiczny jest w rezonansie.' : null;
+
+  diagrams = {};
+  let maxDisp = 0, maxM = 0, maxT = 0, maxN = 0, maxS = 0;
+  const NSAMP = 40;
+  solved.results.forEach((edRes, idx) => {
+    const elId = elements[idx].id;
+    const pts = [];
+    for(let i = 0; i <= NSAMP; i++){
+      const x = edRes.L * i / NSAMP;
+      const pr = FEM.pointResults(edRes, x);
+      pts.push(pr);
+      maxDisp = Math.max(maxDisp, Math.hypot(pr.Ux_global, pr.Uy_global));
+      maxM = Math.max(maxM, Math.abs(pr.M));
+      maxT = Math.max(maxT, Math.abs(pr.V));
+      maxN = Math.max(maxN, Math.abs(pr.N));
+      maxS = Math.max(maxS, Math.abs(pr.sigTop), Math.abs(pr.sigBot));
+    }
+    diagrams[elId] = { pts, L: edRes.L, c: edRes.c, s: edRes.s, n1: getNode(elements[idx].n1) };
+  });
+
+  const bbox = modelBBox();
+  const diag = Math.hypot(bbox.maxX - bbox.minX, bbox.maxY - bbox.minY) || 10;
+  autoDeform = maxDisp > 1e-9 ? (0.15 * diag) / maxDisp : 1;
+  autoDiagM = maxM > 1e-9 ? (0.14 * diag) / maxM : 1;
+  autoDiagT = maxT > 1e-9 ? (0.14 * diag) / maxT : 1;
+  autoDiagN = maxN > 1e-9 ? (0.14 * diag) / maxN : 1;
+  autoDiagS = maxS > 1e-9 ? (0.14 * diag) / maxS : 1;
+  magM = maxM; magT = maxT; magN = maxN; magS = maxS;
+
+  let maxR = 0;
+  for(let i = 0; i < solved.Rglobal.length; i++) maxR = Math.max(maxR, Math.abs(solved.Rglobal[i]));
+  magReaction = maxR;
+  if(elements.length && probe.elId == null) probe.elId = elements[0].id;
+
+  renderSidebar();
+  render();
+  updateRunButton();
+  setStatusHint(`Obliczono drgania wymuszone (f = ${fmtSmart(freqHz, 3)} Hz, ω = ${fmtSmart(out.omega, 2)} rad/s).`);
 }
 
 /* =========================================================================
@@ -3844,17 +4128,17 @@ let analysisCollapsed=false;
 function toggleAnalysisCollapse(){ analysisCollapsed=!analysisCollapsed; renderSidebar(); }
 
 function setAnalysisType(type){
-  if(!analysisSettings) analysisSettings = {type:'linear_static', params:{bucklingModes:4, modalModes:4, includeElementMass:true}};
+  if(!analysisSettings) analysisSettings = {type:'linear_static', params:{bucklingModes:4, modalModes:4, harmonicFreq:5.0, includeElementMass:true}};
   analysisSettings.type = type;
-  if(!analysisSettings.params) analysisSettings.params = {bucklingModes:4, modalModes:4, includeElementMass:true};
+  if(!analysisSettings.params) analysisSettings.params = {bucklingModes:4, modalModes:4, harmonicFreq:5.0, includeElementMass:true};
   invalidateResults();
   renderSidebar();
   render();
 }
 
 function updateAnalysisParam(key, val){
-  if(!analysisSettings) analysisSettings = {type:'linear_static', params:{bucklingModes:4, modalModes:4, includeElementMass:true}};
-  if(!analysisSettings.params) analysisSettings.params = {bucklingModes:4, modalModes:4, includeElementMass:true};
+  if(!analysisSettings) analysisSettings = {type:'linear_static', params:{bucklingModes:4, modalModes:4, harmonicFreq:5.0, includeElementMass:true}};
+  if(!analysisSettings.params) analysisSettings.params = {bucklingModes:4, modalModes:4, harmonicFreq:5.0, includeElementMass:true};
   analysisSettings.params[key] = val;
   invalidateResults();
   renderSidebar();
@@ -3863,7 +4147,7 @@ function updateAnalysisParam(key, val){
 
 function panelAnalysisType(){
   const type = (analysisSettings && analysisSettings.type) || 'linear_static';
-  const params = (analysisSettings && analysisSettings.params) || {bucklingModes:4, modalModes:4, includeElementMass:true};
+  const params = (analysisSettings && analysisSettings.params) || {bucklingModes:4, modalModes:4, harmonicFreq:5.0, includeElementMass:true};
   return `<div class="panel">
     <h3 class="collapsible-head" onclick="toggleAnalysisCollapse()">Rodzaj analizy <span class="subtle-icon">${analysisCollapsed?'▸':'▾'}</span></h3>
     <div id="analysisBody" style="${analysisCollapsed?'display:none;':''}">
@@ -3874,6 +4158,7 @@ function panelAnalysisType(){
             <option value="linear_static" ${type==='linear_static'?'selected':''}>Statyka liniowa</option>
             <option value="stability" ${type==='stability'?'selected':''}>Stateczność (wyboczenie)</option>
             <option value="modal" ${type==='modal'?'selected':''}>Drgania własne (modalna)</option>
+            <option value="harmonic" ${type==='harmonic'?'selected':''}>Drgania wymuszone (harmoniczne)</option>
           </select>
         </div>
         ${type==='linear_static' ? `
@@ -3900,6 +4185,19 @@ function panelAnalysisType(){
           </div>
           <div class="muted" style="margin-top:6px;line-height:1.4;">
             Analiza modalna: wyznacza częstotliwości drgań f [Hz], okresy T [s], częstości kołowe ω [rad/s] oraz formy drgań z uwzględnieniem mas skupionych w węzłach i masy własnej prętów.
+          </div>
+        ` : ''}
+        ${type==='harmonic' ? `
+          <div class="row" style="margin-top:8px;">
+            <label style="min-width:110px;">Częstotliwość f</label>
+            <input type="number" min="0" max="10000" step="0.1" value="${params.harmonicFreq!=null?params.harmonicFreq:5.0}" onchange="updateAnalysisParam('harmonicFreq', Math.max(0, parseFloat(this.value)||0))" style="max-width:80px;">
+            <span class="unit">Hz</span>
+          </div>
+          <div class="checkline" style="margin-top:8px;">
+            <input type="checkbox" id="harmonicIncludeElemMass" ${(params.includeElementMass!==false)?'checked':''} onchange="updateAnalysisParam('includeElementMass', this.checked)"> Uwzględnij masę prętów
+          </div>
+          <div class="muted" style="margin-top:6px;line-height:1.4;">
+            Drgania harmoniczne bez tłumienia: obciążenia z modelu stanowią amplitudę wymuszenia F(t) = F₀ · sin(2πf · t). Analiza wyznacza rzeczywiste amplitudy przemieszczeń, sił wewnętrznych i naprężeń.
           </div>
         ` : ''}
       </div>
@@ -4655,12 +4953,62 @@ function panelResults(){
   if(solved.type === 'modal'){
     return panelModalResults();
   }
+  if(solved.type === 'harmonic'){
+    return panelHarmonicResults();
+  }
   let html = `<div class="panel"><h3>Reakcje <span class="tag">rozwiązano</span></h3>`;
   if(solveWarning) html += `<div class="warn">${solveWarning}</div>`;
   html += reactionsTableHtml();
   html += `</div>`;
   html += diagramTogglesHtml();
   html += probePanelHtml();
+  return html;
+}
+
+function panelHarmonicResults(){
+  let html = `<div class="panel">
+    <h3>Drgania wymuszone <span class="tag">Harmoniczna</span></h3>
+    ${solveWarning ? `<div class="warn">${solveWarning}</div>` : ''}
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <span style="color:var(--text-dim);font-size:11.5px;">Częstotliwość wymuszenia f:</span>
+        <span style="font-family:var(--mono);font-weight:700;font-size:15px;color:var(--accent);">${fmtSmart(solved.freqHz, 3)} Hz</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;">
+        <span style="color:var(--text-dim);font-size:11px;">Częstość kołowa Ω:</span>
+        <span style="font-family:var(--mono);font-weight:600;font-size:12px;color:var(--text);">${fmtSmart(solved.omega, 2)} rad/s</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;">
+        <span style="color:var(--text-dim);font-size:11px;">Okres wymuszenia T:</span>
+        <span style="font-family:var(--mono);font-weight:600;font-size:12px;color:var(--text);">${solved.freqHz > 1e-6 ? fmtSmart(1.0/solved.freqHz, 4) + ' s' : '∞'}</span>
+      </div>
+      <div class="muted" style="margin-top:8px;line-height:1.45;">
+        Amplitudy stanu ustalonego dla wymuszenia harmonicznego F(t) = F₀ · sin(Ωt).
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Amplitudy reakcji <span class="tag">R_dyn</span></h3>
+    ${reactionsTableHtml()}
+  </div>
+
+  <div class="panel">
+    <h3>Widok wyników</h3>
+    ${diagToggleRow('Reakcje dynamiczne','showReactions',showReactions,'--react-color')}
+    ${diagToggleRow('Amplituda ugięcia (deformacja)','showDeform',showDeform,'--def-color')}
+    ${showDeform ? deformSliderHtml() : ''}
+    <hr class="sep" style="margin:8px 0;">
+    <div style="font-weight:600;font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em;">Amplitudy sił i naprężeń</div>
+    ${diagToggleRow('Siła osiowa N_dyn','showN',showN,'--n-color')}
+    ${diagToggleRow('Siła tnąca T_dyn','showT',showT,'--t-color')}
+    ${diagToggleRow('Moment zginający M_dyn','showM',showM,'--m-color')}
+    ${diagToggleRow('Naprężenia σ_dyn','showStress',showStress,'--s-color')}
+    ${(showN||showT||showM||showStress) ? diagramSliderHtml() : ''}
+  </div>
+
+  ${probePanelHtml()}
+  `;
   return html;
 }
 
