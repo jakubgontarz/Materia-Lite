@@ -177,8 +177,8 @@
     #main{ flex-direction:column; }
     #canvasWrap{ flex:1 1 auto; min-height:140px; }
     #sidebar{
-      width:100%; flex:0 0 auto; height:44vh; min-height:170px; max-height:62vh;
-      border-left:none; border-top:2px solid var(--sidebar-border);
+      width:100%; flex:0 0 auto; height:44vh; min-height:20px; max-height:62vh;
+      border-left:none; border-top:none;
     }
     #sidebarScroll{
       -webkit-overflow-scrolling:touch;
@@ -187,13 +187,15 @@
     }
     #panelHandle{
       display:flex;align-items:center;justify-content:center;flex:0 0 auto;
-      height:20px;touch-action:none;cursor:grab;
+      height:20px;touch-action:none;cursor:grab;cursor:row-resize;
       -webkit-user-select:none;user-select:none;
+      background:var(--sidebar-bg);
+      border-top:1px solid var(--sidebar-border);
     }
     .panel-grip{width:38px;height:4px;border-radius:3px;background:var(--sidebar-border);}
     /* Pasek statusu tuż nad panelem jest też uchwytem do zmiany jego
        wysokości — większy, wygodniejszy cel dotyku niż sam mały uchwyt. */
-    #statusbar{ touch-action:none;cursor:grab;-webkit-user-select:none;user-select:none; }
+    #statusbar{ touch-action:none;cursor:grab;cursor:row-resize;-webkit-user-select:none;user-select:none; }
     .tb-btn span{display:none;}
     .tb-btn{min-width:auto;padding:7px 8px;}
     .tb-label{display:none;}
@@ -1877,10 +1879,11 @@ function drawNodeCoordTip(nodeId){
   const bx=cx-w/2-padH, by=cy;
   ctx.fillStyle=DIMCOLOR;
   roundRect(bx,by,w+2*padH,h,4); ctx.fill();
-  // mały „ogonek” wskazujący w dół, na węzeł
+  // „ogonek” wskazujący w dół, sięgający bezpośrednio do węzła
+  const nodeRadius = isNodeSelected(nodeId) ? 7 : 5.5;
   ctx.beginPath();
   ctx.moveTo(cx-5, by+h);
-  ctx.lineTo(cx, by+h+6);
+  ctx.lineTo(cx, p.y - nodeRadius - 1);
   ctx.lineTo(cx+5, by+h);
   ctx.closePath(); ctx.fill();
   ctx.fillStyle='#fff';
@@ -3764,26 +3767,6 @@ function removeSection(id){
 
 /* =========================================================================
    MOBILE BOTTOM PANEL — dynamiczna wysokość sterowana przeciąganiem
-   Zmiana wysokości i scrollowanie treści są celowo ROZDZIELONE na dwa różne
-   elementy DOM:
-     - #panelHandle — mały uchwyt u góry panelu. TYLKO on dostaje handlery
-       touch i TYLKO on zmienia sidebarEl.style.height.
-     - #sidebarScroll — cała treść panelu. Nie ma na nim żadnych handlerów
-       touch — scrolluje się w 100% natywnie, przeglądarka sama nim rządzi.
-   Wcześniej oba gesty żyły na jednym elemencie (JS dynamicznie przełączał
-   się między "zmieniaj wysokość" a "pozwól scrollować" i wołał
-   preventDefault() w zależności od pozycji scrolla). To dawało niespójne
-   zachowanie między silnikami:
-     - Firefox: raz podjęta w touchmove decyzja "to nie scroll" (bo padło
-       preventDefault) blokuje natywny scroll do końca CAŁEGO gestu, nawet
-       gdy JS przestaje wołać preventDefault w tym samym dotknięciu — więc
-       scroll ruszał dopiero przy kolejnym, osobnym dotknięciu.
-     - Chrome-based: sidebarEl.style.height zmieniany co klatkę touchmove
-       wymuszał reflow #main → ResizeObserver na #canvasWrap → resizeCanvas()
-       (realokacja bitmapy canvasu + pełny render()) co klatkę — stąd lagi.
-   Rozdzielenie na dwa elementy usuwa ten konflikt u źródła w obu silnikach:
-   scroll treści nigdy nie dotyka wysokości panelu, więc nigdy nie odpala
-   resize'u canvasu ani nie jest niczym blokowany.
    ========================================================================= */
 function initMobilePanelResize(){
   const sidebarEl = document.getElementById('sidebar');
@@ -3792,16 +3775,12 @@ function initMobilePanelResize(){
   const statusbarEl = document.getElementById('statusbar'); // dodatkowy, większy cel do złapania — patrz niżej
   if(!sidebarEl || !handleEl || !scrollEl) return;
   const mq = window.matchMedia('(max-width:860px)');
-  const PANEL_MIN = 170;        // px — minimalna wysokość panelu
+  const PANEL_MIN = 20;        // px — minimalna wysokość panelu
   const PANEL_MAX_RATIO = 0.62; // panel nie większy niż 62% wysokości okna
 
   let panelH = null; // aktualna wysokość panelu w px (null = jeszcze nieustawiona)
 
   function viewportH(){
-    // visualViewport.height jest wiarygodniejsze niż window.innerHeight, gdy
-    // otwarta jest klawiatura ekranowa — część przeglądarek (np. starsze
-    // silniki oparte na Chromium, w tym niektóre wersje Samsung Internet)
-    // nie zmniejsza window.innerHeight przy pokazaniu klawiatury.
     return (window.visualViewport && window.visualViewport.height) || window.innerHeight;
   }
   function maxH(){ return Math.round(viewportH() * PANEL_MAX_RATIO); }
@@ -3813,43 +3792,58 @@ function initMobilePanelResize(){
     return clamped;
   }
 
-  // --- przeciąganie uchwytu (jedyne miejsce, które zmienia wysokość) ---
+  // --- przeciąganie uchwytu (zmienia wysokość za pomocą dotyku lub myszy) ---
   let dragging = false, anchorY = 0, anchorH = 0;
 
-  function onHandleStart(e){
-    if(!mq.matches || e.touches.length !== 1) return;
+  function getClientY(e){
+    if(e.touches && e.touches.length > 0) return e.touches[0].clientY;
+    return e.clientY;
+  }
+
+  function onDragStart(e){
+    if(!mq.matches) return;
+    if(e.type === 'mousedown' && e.button !== 0) return;
+    if(e.touches && e.touches.length !== 1) return;
     dragging = true;
-    anchorY = e.touches[0].clientY;
+    anchorY = getClientY(e);
     anchorH = panelH ?? sidebarEl.getBoundingClientRect().height;
+    if(e.type === 'mousedown'){
+      e.preventDefault();
+      document.body.style.cursor = 'row-resize';
+      document.body.style.userSelect = 'none';
+      window.addEventListener('mousemove', onDragMove);
+      window.addEventListener('mouseup', onDragEnd);
+    }
   }
-  function onHandleMove(e){
-    if(!dragging || e.touches.length !== 1) return;
-    e.preventDefault(); // uchwyt nigdy nic nie scrolluje — bezpiecznie blokujemy domyślkę
-    applyHeight(anchorH - (e.touches[0].clientY - anchorY));
-    // Świadomie NIE dotykamy tu canvasu bezpośrednio — samo napisanie
-    // sidebarEl.style.height (czysty zapis, bez odczytu zaraz potem) jest
-    // tanie. Faktyczny resizeCanvas()+render() dzieje się w ResizeObserver
-    // w init(), zthrottlowany do jednego wywołania na klatkę animacji —
-    // dzięki temu canvas realnie dorysowuje odsłaniany obszar (nie zostaje
-    // pusty), a mimo to nie przerysowujemy go częściej niż ma to sens.
+
+  function onDragMove(e){
+    if(!dragging) return;
+    if(e.touches && e.touches.length !== 1) return;
+    if(e.cancelable) e.preventDefault();
+    applyHeight(anchorH - (getClientY(e) - anchorY));
   }
-  function onHandleEnd(){ dragging = false; }
 
-  handleEl.addEventListener('touchstart', onHandleStart, {passive:true});
-  handleEl.addEventListener('touchmove', onHandleMove, {passive:false});
-  handleEl.addEventListener('touchend', onHandleEnd, {passive:true});
-  handleEl.addEventListener('touchcancel', onHandleEnd, {passive:true});
+  function onDragEnd(e){
+    if(!dragging) return;
+    dragging = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', onDragMove);
+    window.removeEventListener('mouseup', onDragEnd);
+  }
 
-  // Pasek statusu (nad uchwytem, na dole obszaru rysowania) dostaje dokładnie
-  // te same handlery — to po prostu drugi, dużo większy cel dotyku dla tego
-  // samego gestu zmiany wysokości. Jest statycznym elementem DOM (nie jest
-  // nadpisywany przez innerHTML tak jak treść panelu), więc bezpiecznie
-  // podpinamy się do niego raz, tutaj.
+  handleEl.addEventListener('touchstart', onDragStart, {passive:true});
+  handleEl.addEventListener('touchmove', onDragMove, {passive:false});
+  handleEl.addEventListener('touchend', onDragEnd, {passive:true});
+  handleEl.addEventListener('touchcancel', onDragEnd, {passive:true});
+  handleEl.addEventListener('mousedown', onDragStart);
+
   if(statusbarEl){
-    statusbarEl.addEventListener('touchstart', onHandleStart, {passive:true});
-    statusbarEl.addEventListener('touchmove', onHandleMove, {passive:false});
-    statusbarEl.addEventListener('touchend', onHandleEnd, {passive:true});
-    statusbarEl.addEventListener('touchcancel', onHandleEnd, {passive:true});
+    statusbarEl.addEventListener('touchstart', onDragStart, {passive:true});
+    statusbarEl.addEventListener('touchmove', onDragMove, {passive:false});
+    statusbarEl.addEventListener('touchend', onDragEnd, {passive:true});
+    statusbarEl.addEventListener('touchcancel', onDragEnd, {passive:true});
+    statusbarEl.addEventListener('mousedown', onDragStart);
   }
 
   function resetForViewport(){
@@ -3868,16 +3862,7 @@ function initMobilePanelResize(){
   else mq.addListener(resetForViewport); // starsze przeglądarki
   window.addEventListener('resize', ()=>{ if(mq.matches && panelH!=null) applyHeight(panelH); });
 
-  /* ---- Klawiatura ekranowa ----
-     Niektóre mobilne przeglądarki (m.in. Samsung Internet) nie odpalają
-     window 'resize' przy pokazaniu/schowaniu klawiatury — tylko
-     visualViewport 'resize', i to zanim metryki się w pełni ustabilizują
-     po animacji zamykania klawiatury. Bez ponownego przeliczenia wysokości
-     panelu w tym momencie, sidebarEl.style.height zostawał "zamrożony" na
-     wartości sprzed zamknięcia klawiatury i było to widać dopiero jako
-     nagły skok przy kolejnym dotknięciu ekranu. Doklejamy więc przeliczenie
-     zarówno od razu, jak i z małym opóźnieniem (analogicznie do resettle()
-     w init(), które radzi sobie z tym samym rodzajem "osiadania" layoutu). */
+  /* ---- Klawiatura ekranowa ---- */
   function reclamp(){
     if(!mq.matches || panelH==null) return;
     applyHeight(panelH);
@@ -3906,10 +3891,6 @@ function init(){
   renderSidebar();
   render();
 
-  // On mobile / embedded (iframe) hosts, the container can still be settling its
-  // final size for a moment after first paint (fonts, host chrome, address bar,
-  // safe-area insets) — resize/fit again once things are stable, unless the
-  // person has already started interacting with the view themselves.
   const resettle = ()=>{
     if(userAdjustedView) return;
     resizeCanvas();
@@ -3923,20 +3904,9 @@ function init(){
     window.visualViewport.addEventListener('resize', ()=>{ resizeCanvas(); });
   }
 
-  // canvasWrap może zmienić rozmiar z wielu powodów niezwiązanych z resize okna
-  // (np. panel mobilny zmienia wysokość przez przeciągnięcie uchwytu) —
-  // ResizeObserver gwarantuje, że bitmapa canvasu zawsze dopasuje się do
-  // faktycznego rozmiaru elementu, zamiast być rozciągana przez CSS
-  // (width:100%;height:100%), co dawało efekt nienaturalnego skalowania
-  // rysunku w pionie.
   if('ResizeObserver' in window){
     let roPending=false;
     const ro = new ResizeObserver(()=>{
-      // Throttlowane do jednego resizeCanvas()+render() na klatkę animacji —
-      // to wystarcza, żeby canvas realnie dorysowywał się w trakcie
-      // przeciągania uchwytu panelu (zamiast zostawiać pusty, nieodświeżony
-      // obszar pod spodem), a jednocześnie nie robimy tego częściej niż ma
-      // to sens (przeglądarka i tak nie namaluje więcej niż raz na klatkę).
       if(roPending) return;
       roPending=true;
       requestAnimationFrame(()=>{ roPending=false; resizeCanvas(); });
