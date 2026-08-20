@@ -838,6 +838,14 @@ let elements=[];  // {id,n1,n2,sectionId,materialId,hingeStart,hingeEnd,q:{qStar
 let nextNodeId=1, nextElemId=1;
 let defaultSectionId=1, defaultMaterialId=1;
 
+// Analysis settings (stored with model in JSON, configurable in sidebar above library)
+let analysisSettings = {
+  type: 'linear_static', // 'linear_static' | 'stability' | ...
+  params: {
+    bucklingModes: 4
+  }
+};
+
 let mode='select';           // select | addNode | addBar | delete
 let selection={nodeIds:[], elemIds:[]};   // multi-selection: arrays of currently selected node/element ids
 let barStart=null;
@@ -1110,6 +1118,15 @@ function modelBBox(){
 }
 
 function runAnalysis(){
+  const anType = (analysisSettings && analysisSettings.type) || 'linear_static';
+  if(anType === 'stability'){
+    runStabilityAnalysis();
+    return;
+  }
+  runLinearStaticAnalysis();
+}
+
+function runLinearStaticAnalysis(){
   if(nodes.length<2 || elements.length<1){
     solveWarning='Dodaj co najmniej dwa węzły i jeden pręt, aby uruchomić obliczenia.';
     solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
@@ -1166,6 +1183,14 @@ function runAnalysis(){
   renderSidebar();
   render();
   updateRunButton();
+}
+
+function runStabilityAnalysis(){
+  const modes = (analysisSettings && analysisSettings.params && analysisSettings.params.bucklingModes) || 4;
+  setStatusHint(`Wybrano analizę stateczności (liczba modów: ${modes}). Moduł solvera wyboczeniowego zostanie zaimplementowany.`);
+  solveWarning = `Analiza stateczności (${modes} mody): moduł obliczeń wyboczeniowych jest przygotowany do rozszerzenia o solver macierzy geometrycznej Kg.`;
+  solved=null; diagrams=null;
+  renderSidebar(); render(); updateRunButton();
 }
 
 /* =========================================================================
@@ -2365,6 +2390,7 @@ function closeOptionsModal(){ const o=document.getElementById('optionsOverlay');
 
 function newModel(){
   nodes=[]; elements=[]; nextNodeId=1; nextElemId=1;
+  analysisSettings = { type: 'linear_static', params: { bucklingModes: 4 } };
   clearSelection(); invalidateResults();
   fitView(); setMode('select'); renderSidebar(); render();
 }
@@ -2427,7 +2453,19 @@ function confirmExport(){
   const fileName = currentModelFileName + '.json';
   closeExportModal();
 
-  const data={nodes,elements,materials,sections,nextNodeId,nextElemId,nextMatId,nextSecId,defaultSectionId,defaultMaterialId};
+  const data={
+    nodes,
+    elements,
+    materials,
+    sections,
+    analysisSettings: analysisSettings || { type: 'linear_static', params: { bucklingModes: 4 } },
+    nextNodeId,
+    nextElemId,
+    nextMatId,
+    nextSecId,
+    defaultSectionId,
+    defaultMaterialId
+  };
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=fileName; a.click();
@@ -2446,6 +2484,14 @@ function importModelFile(e){
       const data=JSON.parse(reader.result);
       nodes=data.nodes||[]; elements=data.elements||[];
       materials=data.materials||materials; sections=data.sections||sections;
+      if(data.analysisSettings && typeof data.analysisSettings === 'object'){
+        analysisSettings = {
+          type: data.analysisSettings.type || 'linear_static',
+          params: Object.assign({ bucklingModes: 4 }, data.analysisSettings.params || {})
+        };
+      } else {
+        analysisSettings = { type: 'linear_static', params: { bucklingModes: 4 } };
+      }
       nextNodeId=data.nextNodeId||uid(nodes); nextElemId=data.nextElemId||uid(elements);
       nextMatId=data.nextMatId||uid(materials); nextSecId=data.nextSecId||uid(sections);
       defaultSectionId=data.defaultSectionId||sections[0].id; defaultMaterialId=data.defaultMaterialId||materials[0].id;
@@ -2788,8 +2834,69 @@ function renderSidebar(){
   checkAndPushHistory();
   pruneSelection();
   const sb=document.getElementById('sidebarScroll');
-  sb.innerHTML = panelSelection() + panelResults() + panelLibrary();
+  sb.innerHTML = panelSelection() + panelResults() + panelAnalysisType() + panelLibrary();
   sb.querySelectorAll('[data-indeterminate="true"]').forEach(el=>{ el.indeterminate=true; });
+}
+
+/* =========================================================================
+   SIDEBAR — analysis type panel
+   ========================================================================= */
+let analysisCollapsed=false;
+function toggleAnalysisCollapse(){ analysisCollapsed=!analysisCollapsed; renderSidebar(); }
+
+function setAnalysisType(type){
+  if(!analysisSettings) analysisSettings = {type:'linear_static', params:{bucklingModes:4}};
+  analysisSettings.type = type;
+  if(!analysisSettings.params) analysisSettings.params = {bucklingModes:4};
+  invalidateResults();
+  renderSidebar();
+  render();
+}
+
+function updateAnalysisParam(key, val){
+  if(!analysisSettings) analysisSettings = {type:'linear_static', params:{bucklingModes:4}};
+  if(!analysisSettings.params) analysisSettings.params = {bucklingModes:4};
+  analysisSettings.params[key] = val;
+  invalidateResults();
+  renderSidebar();
+  render();
+}
+
+function panelAnalysisType(){
+  const type = (analysisSettings && analysisSettings.type) || 'linear_static';
+  const params = (analysisSettings && analysisSettings.params) || {bucklingModes:4};
+  const typeLabels = {
+    'linear_static': 'Statyka liniowa',
+    'stability': 'Stateczność (wyboczenie)'
+  };
+  return `<div class="panel">
+    <h3 class="collapsible-head" onclick="toggleAnalysisCollapse()">Rodzaj analizy <span class="subtle-icon">${analysisCollapsed?'▸':'▾'}</span></h3>
+    <div id="analysisBody" style="${analysisCollapsed?'display:none;':''}">
+      <div class="card">
+        <div class="row">
+          <label style="min-width:70px;">Analiza</label>
+          <select id="analysisTypeSel" onchange="setAnalysisType(this.value)">
+            <option value="linear_static" ${type==='linear_static'?'selected':''}>Statyka liniowa</option>
+            <option value="stability" ${type==='stability'?'selected':''}>Stateczność</option>
+          </select>
+        </div>
+        ${type==='linear_static' ? `
+          <div class="muted" style="margin-top:6px;line-height:1.4;">
+            Podstawowa analiza statyczna I rzędu: wyznacza siły wewnętrzne (N, T, M), ugięcia i reakcje dla zadanego obciążenia.
+          </div>
+        ` : ''}
+        ${type==='stability' ? `
+          <div class="row" style="margin-top:8px;">
+            <label style="min-width:110px;">Liczba form (modów)</label>
+            <input type="number" min="1" max="50" step="1" value="${params.bucklingModes||4}" onchange="updateAnalysisParam('bucklingModes', Math.max(1, parseInt(this.value)||1))" style="max-width:70px;">
+          </div>
+          <div class="muted" style="margin-top:6px;line-height:1.4;">
+            Analiza wyboczeniowa / stateczności: wyznacza mnożniki obciążenia krytycznego i formy utraty stateczności.
+          </div>
+        ` : ''}
+      </div>
+    </div>
+  </div>`;
 }
 
 /* =========================================================================
@@ -2805,6 +2912,7 @@ function renderSidebar(){
    ========================================================================= */
 function modelSnapshot(){
   return JSON.stringify({nodes,elements,materials,sections,
+    analysisSettings,
     nextNodeId,nextElemId,nextMatId,nextSecId,defaultSectionId,defaultMaterialId});
 }
 function checkAndPushHistory(){
@@ -2820,6 +2928,14 @@ function checkAndPushHistory(){
 function restoreSnapshot(json){
   const d=JSON.parse(json);
   nodes=d.nodes; elements=d.elements; materials=d.materials; sections=d.sections;
+  if(d.analysisSettings && typeof d.analysisSettings === 'object'){
+    analysisSettings = {
+      type: d.analysisSettings.type || 'linear_static',
+      params: Object.assign({ bucklingModes: 4 }, d.analysisSettings.params || {})
+    };
+  } else {
+    analysisSettings = { type: 'linear_static', params: { bucklingModes: 4 } };
+  }
   nextNodeId=d.nextNodeId; nextElemId=d.nextElemId; nextMatId=d.nextMatId; nextSecId=d.nextSecId;
   defaultSectionId=d.defaultSectionId; defaultMaterialId=d.defaultMaterialId;
   invalidateResults();
