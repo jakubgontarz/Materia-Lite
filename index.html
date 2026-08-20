@@ -668,6 +668,49 @@ function condenseKg(kg, kFull, condIdx){
   return kgOut;
 }
 
+function localConsistentMass(mTotal, L){
+  const m = zerosMat(6,6);
+  if(mTotal <= 1e-15 || L < 1e-6) return m;
+  const ma = mTotal / 6;
+  m[0][0] = 2 * ma;
+  m[0][3] = 1 * ma;
+  m[3][0] = 1 * ma;
+  m[3][3] = 2 * ma;
+
+  const mb = mTotal / 420;
+  m[1][1] = 156 * mb;
+  m[1][2] = 22 * L * mb;
+  m[1][4] = 54 * mb;
+  m[1][5] = -13 * L * mb;
+
+  m[2][1] = 22 * L * mb;
+  m[2][2] = 4 * L * L * mb;
+  m[2][4] = 13 * L * mb;
+  m[2][5] = -3 * L * L * mb;
+
+  m[4][1] = 54 * mb;
+  m[4][2] = 13 * L * mb;
+  m[4][4] = 156 * mb;
+  m[4][5] = -22 * L * mb;
+
+  m[5][1] = -13 * L * mb;
+  m[5][2] = -3 * L * L * mb;
+  m[5][4] = -22 * L * mb;
+  m[5][5] = 4 * L * L * mb;
+  return m;
+}
+
+function localLumpedMass(mTotal, L){
+  const m = zerosMat(6,6);
+  if(mTotal <= 1e-15 || L < 1e-6) return m;
+  const mh = mTotal / 2;
+  m[0][0] = mh;
+  m[1][1] = mh;
+  m[3][3] = mh;
+  m[4][4] = mh;
+  return m;
+}
+
 function cholesky(A){
   const n = A.length;
   const L = zerosMat(n,n);
@@ -1004,8 +1047,334 @@ function solveStability(model, maxModes=4){
   };
 }
 
-window.FEM = { solveModel, solveStability, pointResults };
+function solveModal(model, maxModes=4, options={}){
+  const nodes = model.nodes;
+  const elements = model.elements;
+  const nDof = 3 * nodes.length;
+  const nodeIndex = {};
+  nodes.forEach((n, i) => { nodeIndex[n.id] = i; });
+
+  const includeElemMass = options.includeElementMass !== false;
+  const massMatrixType = options.massMatrixType || 'consistent';
+
+  // 1. Build element data, stiffness and mass matrices
+  const elemData = elements.map(el => {
+    const n1 = nodes.find(n => n.id === el.n1);
+    const n2 = nodes.find(n => n.id === el.n2);
+    const dx = n2.x - n1.x, dy = n2.y - n1.y;
+    const L = Math.hypot(dx, dy) || 1e-6;
+    const c = dx / L, s = dy / L;
+
+    const kFull = localStiffness(el.E, el.A, el.I, L);
+    const condIdx = [];
+    if(el.hingeStart) condIdx.push(2);
+    if(el.hingeEnd) condIdx.push(5);
+
+    const { k: kCond } = condense(kFull, zerosVec(6), condIdx);
+    const T = [[c,s,0,0,0,0],[-s,c,0,0,0,0],[0,0,1,0,0,0],[0,0,0,c,s,0],[0,0,0,-s,c,0],[0,0,0,0,0,1]];
+    const Tt = transpose(T);
+    const kGlobal = matMul(matMul(Tt, kCond), T);
+
+    const dofMap = [
+      3 * nodeIndex[el.n1] + 0, 3 * nodeIndex[el.n1] + 1, 3 * nodeIndex[el.n1] + 2,
+      3 * nodeIndex[el.n2] + 0, 3 * nodeIndex[el.n2] + 1, 3 * nodeIndex[el.n2] + 2
+    ];
+
+    // Element mass: rho (kg/m3) * A_real (m2) * L (m) / 1000 => tonnes
+    const dens = (el.density != null) ? el.density : 7850;
+    const Area = (el.A_real != null) ? el.A_real : el.A;
+    const mTotal = includeElemMass ? (dens * Area * L / 1000) : 0;
+
+    let mGlobal = zerosMat(6, 6);
+    if(mTotal > 1e-15){
+      const mLocal = (massMatrixType === 'lumped') ? localLumpedMass(mTotal, L) : localConsistentMass(mTotal, L);
+      const mCond = condenseKg(mLocal, kFull, condIdx);
+      mGlobal = matMul(matMul(Tt, mCond), T);
+    }
+
+    return { el, n1, n2, L, c, s, kFull, condIdx, kCond, kGlobal, mGlobal, dofMap, mTotal };
+  });
+
+  let K = zerosMat(nDof, nDof);
+  let M = zerosMat(nDof, nDof);
+
+  elemData.forEach(ed => {
+    for(let i = 0; i < 6; i++){
+      for(let j = 0; j < 6; j++){
+        K[ed.dofMap[i]][ed.dofMap[j]] += ed.kGlobal[i][j];
+        M[ed.dofMap[i]][ed.dofMap[j]] += ed.mGlobal[i][j];
+      }
+    }
+  });
+
+  // 2. Add nodal lumped masses
+  nodes.forEach((n, i) => {
+    if(n.mass){
+      const mx = (n.mass.mx || 0) / 1000;
+      const my = (n.mass.my || 0) / 1000;
+      const Im = (n.mass.Im || 0) / 1000;
+      if(mx > 0) M[3*i + 0][3*i + 0] += mx;
+      if(my > 0) M[3*i + 1][3*i + 1] += my;
+      if(Im > 0) M[3*i + 2][3*i + 2] += Im;
+    }
+  });
+
+  // 3. Coordinate rotation at angled supports
+  const Lambda = zerosMat(nDof, nDof);
+  for(let i = 0; i < nDof; i++) Lambda[i][i] = 1;
+  const supportMap = {};
+  (model.supports || []).forEach(sp => { supportMap[sp.nodeId] = sp; });
+
+  nodes.forEach((n, i) => {
+    const sp = supportMap[n.id];
+    if(sp && sp.angleDeg){
+      const a = sp.angleDeg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+      const iu = 3*i, iv = 3*i + 1;
+      Lambda[iu][iu] = c; Lambda[iu][iv] = -s; Lambda[iv][iu] = s; Lambda[iv][iv] = c;
+    }
+  });
+  const LambdaT = transpose(Lambda);
+  let Kp = matMul(matMul(LambdaT, K), Lambda);
+  let Mp = matMul(matMul(LambdaT, M), Lambda);
+
+  // 4. Boundary conditions
+  const isFixed = new Array(nDof).fill(false);
+  nodes.forEach((n, i) => {
+    const sp = supportMap[n.id]; if(!sp) return;
+    const dirs = [{ c: sp.ux, dof: 3*i + 0 }, { c: sp.uy, dof: 3*i + 1 }, { c: sp.rz, dof: 3*i + 2 }];
+    dirs.forEach(({ c, dof }) => {
+      if(!c || c.type === 'free') return;
+      if(c.type === 'fixed'){ isFixed[dof] = true; }
+      else if(c.type === 'spring'){ Kp[dof][dof] += c.k; }
+    });
+  });
+
+  let maxDiag = 0;
+  for(let i = 0; i < nDof; i++) maxDiag = Math.max(maxDiag, Math.abs(Kp[i][i]));
+  const floatTol = Math.max(maxDiag, 1) * 1e-9;
+  for(let i = 0; i < nDof; i++){
+    if(!isFixed[i] && Math.abs(Kp[i][i]) < floatTol){ isFixed[i] = true; }
+  }
+
+  const freeIdx = [];
+  for(let i = 0; i < nDof; i++){ if(!isFixed[i]) freeIdx.push(i); }
+
+  if(freeIdx.length === 0){
+    return { singular: false, noMass: false, modes: [], elemData, nodeIndex };
+  }
+
+  const Kff = freeIdx.map(i => freeIdx.map(j => Kp[i][j]));
+  const Mff = freeIdx.map(i => freeIdx.map(j => Mp[i][j]));
+  const nFree = freeIdx.length;
+
+  // Check mass presence
+  let totalFreeMass = 0;
+  for(let i = 0; i < nFree; i++) totalFreeMass += Math.abs(Mff[i][i]);
+  if(totalFreeMass < 1e-12){
+    return { singular: false, noMass: true, modes: [], elemData, nodeIndex };
+  }
+
+  // 5. Cholesky factorization of Kff = L L^T
+  let L = cholesky(Kff);
+  if(!L){
+    const regKff = Kff.map((row, i) => row.map((v, j) => (i === j ? v + 1e-7 * maxDiag : v)));
+    L = cholesky(regKff);
+    if(!L){
+      return { singular: true, noMass: false, modes: [], elemData, nodeIndex };
+    }
+  }
+
+  // 6. Transform to standard symmetric eigenvalue problem: Btilde = L^-1 Mff L^-T
+  const Y = zerosMat(nFree, nFree);
+  for(let col = 0; col < nFree; col++){
+    const bCol = Mff.map(row => row[col]);
+    const yCol = solveL(L, bCol);
+    for(let row = 0; row < nFree; row++) Y[row][col] = yCol[row];
+  }
+
+  const Btilde = zerosMat(nFree, nFree);
+  for(let row = 0; row < nFree; row++){
+    const yRow = Y[row];
+    const bRow = solveL(L, yRow);
+    for(let col = 0; col < nFree; col++) Btilde[row][col] = bRow[col];
+  }
+
+  for(let i = 0; i < nFree; i++){
+    for(let j = i + 1; j < nFree; j++){
+      const avg = (Btilde[i][j] + Btilde[j][i]) / 2;
+      Btilde[i][j] = avg;
+      Btilde[j][i] = avg;
+    }
+  }
+
+  const { eigenvalues: mu, eigenvectors: V } = jacobiSymmetric(Btilde, 200, 1e-12);
+
+  // Total translational mass in global coordinates (in tonnes)
+  let MtotX = 0, MtotY = 0;
+  for(let i = 0; i < nodes.length; i++){
+    MtotX += M[3*i + 0][3*i + 0];
+    MtotY += M[3*i + 1][3*i + 1];
+  }
+
+  const rawModes = [];
+  for(let k = 0; k < nFree; k++){
+    const val = mu[k];
+    if(val > 1e-14){
+      const omega = 1.0 / Math.sqrt(val);
+      const f = omega / (2 * Math.PI);
+      const T = 1.0 / f;
+      const y_k = V.map(row => row[k]);
+      const phi_free = solveLT(L, y_k);
+
+      const Dp = zerosVec(nDof);
+      freeIdx.forEach((gi, idx) => { Dp[gi] = phi_free[idx]; });
+      const D = matVec(Lambda, Dp);
+
+      // Generalized modal mass & participation
+      let Mgen = 0, Lx = 0, Ly = 0;
+      for(let i = 0; i < nDof; i++){
+        let mRowD = 0;
+        for(let j = 0; j < nDof; j++){
+          mRowD += M[i][j] * D[j];
+        }
+        Mgen += D[i] * mRowD;
+        if(i % 3 === 0) Lx += mRowD;
+        if(i % 3 === 1) Ly += mRowD;
+      }
+
+      let massRatioX = 0, massRatioY = 0;
+      if(Mgen > 1e-15){
+        const meffX = (Lx * Lx) / Mgen;
+        const meffY = (Ly * Ly) / Mgen;
+        massRatioX = MtotX > 1e-9 ? (meffX / MtotX) * 100 : 0;
+        massRatioY = MtotY > 1e-9 ? (meffY / MtotY) * 100 : 0;
+      }
+
+      rawModes.push({ omega, f, T, D, massRatioX, massRatioY });
+    }
+  }
+
+  rawModes.sort((a, b) => a.f - b.f);
+  const selectedRawModes = rawModes.slice(0, maxModes);
+
+  const modes = selectedRawModes.map((rm, modeIndex) => {
+    const { omega, f, T, massRatioX, massRatioY } = rm;
+    let D = rm.D;
+
+    const elemResults = elemData.map(ed => {
+      const dg = ed.dofMap.map(i => D[i]);
+      const Tmat = [[ed.c,ed.s,0,0,0,0],[-ed.s,ed.c,0,0,0,0],[0,0,1,0,0,0],
+                    [0,0,0,ed.c,ed.s,0],[0,0,0,-ed.s,ed.c,0],[0,0,0,0,0,1]];
+      const dLocalRaw = matVec(Tmat, dg);
+      const dLocal = backSubstitute(ed.kFull, zerosVec(6), dLocalRaw, ed.condIdx);
+      return { el: ed.el, L: ed.L, c: ed.c, s: ed.s, dLocal, kFull: ed.kFull };
+    });
+
+    let maxDisp = 0;
+    elemResults.forEach(er => {
+      for(let step = 0; step <= 20; step++){
+        const x = er.L * step / 20;
+        const [N1, N2] = shapeN_axial(x, er.L);
+        const [H1, H2, H3, H4] = shapeH_bend(x, er.L);
+        const u = N1 * er.dLocal[0] + N2 * er.dLocal[3];
+        const v = H1 * er.dLocal[1] + H2 * er.dLocal[2] + H3 * er.dLocal[4] + H4 * er.dLocal[5];
+        const Ux = er.c * u - er.s * v;
+        const Uy = er.s * u + er.c * v;
+        maxDisp = Math.max(maxDisp, Math.hypot(Ux, Uy));
+      }
+    });
+
+    if(maxDisp > 1e-12){
+      const norm = 1.0 / maxDisp;
+      D = D.map(v => v * norm);
+      elemResults.forEach(er => {
+        er.dLocal = er.dLocal.map(v => v * norm);
+        er.Fend = matVec(er.kFull, er.dLocal);
+      });
+    } else {
+      elemResults.forEach(er => {
+        er.Fend = matVec(er.kFull, er.dLocal);
+      });
+    }
+
+    function evalPoint(elIdx, x){
+      const er = elemResults[elIdx];
+      const L = er.L;
+      const el = er.el;
+      const dLocal = er.dLocal;
+      const Fend = er.Fend;
+
+      const [N1, N2] = shapeN_axial(x, L);
+      const [H1, H2, H3, H4] = shapeH_bend(x, L);
+      const u = N1 * dLocal[0] + N2 * dLocal[3];
+      const v = H1 * dLocal[1] + H2 * dLocal[2] + H3 * dLocal[4] + H4 * dLocal[5];
+      const xi = x / L;
+      const dH1 = (-6*xi + 6*xi*xi) / L;
+      const dH2 = (1 - 4*xi + 3*xi*xi);
+      const dH3 = (6*xi - 6*xi*xi) / L;
+      const dH4 = (-2*xi + 3*xi*xi);
+      const theta = dH1 * dLocal[1] + dH2 * dLocal[2] + dH3 * dLocal[4] + dH4 * dLocal[5];
+
+      const Ux = er.c * u - er.s * v;
+      const Uy = er.s * u + er.c * v;
+
+      const N = -Fend[0];
+      const V = Fend[1];
+      let M = -Fend[2] + Fend[1] * x;
+      if(el.hingeStart){
+        const th0x = dLocal[2], thL = dLocal[5];
+        const M0 = (el.E * el.I * (thL - th0x) - V * L * L / 2) / L;
+        M = M0 + V * x;
+      }
+
+      const Astress = (el.A_real != null) ? el.A_real : el.A;
+      const cTop = (el.cTop != null) ? el.cTop : (el.h || 0) / 2;
+      const cBot = (el.cBot != null) ? el.cBot : (el.h || 0) / 2;
+      const sigTop = (Astress ? N / Astress : 0) - (el.I ? M * cTop / el.I : 0);
+      const sigBot = (Astress ? N / Astress : 0) + (el.I ? M * cBot / el.I : 0);
+
+      return {
+        x,
+        N,
+        V,
+        M,
+        u_local: u,
+        v_local: v,
+        theta,
+        Ux_global: Ux,
+        Uy_global: Uy,
+        sigTop,
+        sigBot
+      };
+    }
+
+    return {
+      modeIndex,
+      omega,
+      f,
+      T,
+      massRatioX,
+      massRatioY,
+      D,
+      results: elemResults,
+      evalPoint
+    };
+  });
+
+  return {
+    modes,
+    elemData,
+    nodeIndex,
+    singular: false,
+    noMass: modes.length === 0
+  };
+}
+
+window.FEM = { solveModel, solveStability, solveModal, pointResults };
 })();
+
+function zerosMat(r,c){return Array.from({length:r},()=>new Array(c).fill(0));}
+function zerosVec(n){return new Array(n).fill(0);}
 
 /* =========================================================================
    APPLICATION STATE
@@ -1446,7 +1815,7 @@ function invalidateResults(){
    MODEL BUILDING + SOLVE
    ========================================================================= */
 function buildSolverModel(){
-  const nodesArr = nodes.map(n=>({id:n.id,x:n.x,y:n.y}));
+  const nodesArr = nodes.map(n=>({id:n.id, x:n.x, y:n.y, mass:n.mass}));
   const elementsArr = elements.map(el=>{
     const mat=getMaterial(el.materialId), sec=getSection(el.sectionId);
     const E=mat.E*UNIT.GPa, A_real=sec.A*UNIT.cm2, I=sec.I*UNIT.cm4, alpha=mat.alpha*UNIT.alphaU;
@@ -1458,7 +1827,8 @@ function buildSolverModel(){
     const cTop=cTopCm*UNIT.cm, cBot=cBotCm*UNIT.cm;
     const h=(cTopCm+cBotCm)*UNIT.cm; // kept for anything still reading el.h
     const A = includeAxialDeformation ? A_real : A_real*AXIAL_RIGID_FACTOR;
-    const obj={id:el.id,n1:el.n1,n2:el.n2,E,A,A_real,I,alpha,h,cTop,cBot,hingeStart:!!el.hingeStart,hingeEnd:!!el.hingeEnd};
+    const density = (mat.density != null) ? mat.density : 7850;
+    const obj={id:el.id,n1:el.n1,n2:el.n2,E,A,A_real,I,alpha,h,cTop,cBot,density,hingeStart:!!el.hingeStart,hingeEnd:!!el.hingeEnd};
     if(el.q){
       let qS=el.q.qStart, qE=el.q.qEnd, ang=el.q.angle;
       if(el.q.mode==='vertical' || el.q.mode==='horizontal'){
@@ -1504,6 +1874,10 @@ function runAnalysis(){
   const anType = (analysisSettings && analysisSettings.type) || 'linear_static';
   if(anType === 'stability'){
     runStabilityAnalysis();
+    return;
+  }
+  if(anType === 'modal'){
+    runModalAnalysis();
     return;
   }
   runLinearStaticAnalysis();
@@ -1688,6 +2062,126 @@ function runStabilityAnalysis(){
   render();
   updateRunButton();
   setStatusHint(`Obliczono stateczność: ${out.modes.length} ${out.modes.length===1?'forma wyboczenia':'formy wyboczenia'} (Mod 1: α_cr = ${fmtSmart(out.modes[0].alphaCr, 3)}).`);
+}
+
+function prepareModalDiagrams(modeIndex){
+  if(!solved || solved.type !== 'modal' || !solved.modes || !solved.modes.length) return;
+  const mode = solved.modes[modeIndex];
+  if(!mode) return;
+  solved.currentMode = modeIndex;
+
+  diagrams = {};
+  let maxDisp = 0, maxM = 0, maxT = 0, maxN = 0, maxS = 0;
+  const NSAMP = 40;
+
+  solved.elemData.forEach((ed, idx) => {
+    const elId = elements[idx].id;
+    const pts = [];
+    for(let i = 0; i <= NSAMP; i++){
+      const x = ed.L * i / NSAMP;
+      const ptMode = mode.evalPoint(idx, x);
+      pts.push(ptMode);
+      maxDisp = Math.max(maxDisp, Math.hypot(ptMode.Ux_global, ptMode.Uy_global));
+      maxM = Math.max(maxM, Math.abs(ptMode.M));
+      maxT = Math.max(maxT, Math.abs(ptMode.V));
+      maxN = Math.max(maxN, Math.abs(ptMode.N));
+      maxS = Math.max(maxS, Math.abs(ptMode.sigTop), Math.abs(ptMode.sigBot));
+    }
+    diagrams[elId] = { pts, L: ed.L, c: ed.c, s: ed.s, n1: getNode(elements[idx].n1) };
+  });
+
+  const bbox = modelBBox();
+  const diag = Math.hypot(bbox.maxX - bbox.minX, bbox.maxY - bbox.minY) || 10;
+  autoDeform = maxDisp > 1e-9 ? (0.15 * diag) / maxDisp : 1;
+  autoDiagM = maxM > 1e-9 ? (0.14 * diag) / maxM : 1;
+  autoDiagT = maxT > 1e-9 ? (0.14 * diag) / maxT : 1;
+  autoDiagN = maxN > 1e-9 ? (0.14 * diag) / maxN : 1;
+  autoDiagS = maxS > 1e-9 ? (0.14 * diag) / maxS : 1;
+  magM = maxM; magT = maxT; magN = maxN; magS = maxS;
+  magReaction = 0;
+  if(elements.length && probe.elId == null) probe.elId = elements[0].id;
+}
+
+function setModalMode(idx){
+  if(!solved || solved.type !== 'modal' || !solved.modes || !solved.modes[idx]) return;
+  prepareModalDiagrams(idx);
+  renderSidebar();
+  render();
+}
+
+function prevModalMode(){
+  if(!solved || solved.type !== 'modal' || !solved.modes || solved.modes.length <= 1) return;
+  const cur = solved.currentMode || 0;
+  const next = cur > 0 ? cur - 1 : solved.modes.length - 1;
+  setModalMode(next);
+}
+
+function nextModalMode(){
+  if(!solved || solved.type !== 'modal' || !solved.modes || solved.modes.length <= 1) return;
+  const cur = solved.currentMode || 0;
+  const next = cur < solved.modes.length - 1 ? cur + 1 : 0;
+  setModalMode(next);
+}
+
+function runModalAnalysis(){
+  if(nodes.length < 2 || elements.length < 1){
+    solveWarning = 'Dodaj co najmniej dwa węzły i jeden pręt, aby uruchomić obliczenia.';
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+  const hasAnySupport = nodes.some(n => n.support && (
+    (n.support.ux && n.support.ux.type !== 'free') || (n.support.uy && n.support.uy.type !== 'free') || (n.support.rz && n.support.rz.type !== 'free')));
+  if(!hasAnySupport){
+    solveWarning = 'Model nie ma zdefiniowanych podpór — układ jest niestabilny.';
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  const model = buildSolverModel();
+  const modesCount = (analysisSettings && analysisSettings.params && analysisSettings.params.modalModes) || 4;
+  const includeElementMass = !(analysisSettings && analysisSettings.params && analysisSettings.params.includeElementMass === false);
+  let out;
+  try{
+    out = FEM.solveModal(model, modesCount, { includeElementMass });
+  } catch(e){
+    solveWarning = 'Błąd analizy modalnej: ' + e.message;
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  if(out.singular){
+    solveWarning = 'Układ może być geometrycznie niestabilny lub niedostatecznie podparty — macierz sztywności jest osobliwa.';
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  if(out.noMass || !out.modes || out.modes.length === 0){
+    solveWarning = 'W modelu nie wykryto masy (brak zdefiniowanych mas skupionych w węzłach oraz wyłączona masa własna prętów).';
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  solved = {
+    type: 'modal',
+    modes: out.modes,
+    currentMode: 0,
+    elemData: out.elemData,
+    nodeIndex: out.nodeIndex,
+    Rglobal: zerosVec(3 * nodes.length),
+    results: out.modes[0].results
+  };
+
+  solveWarning = null;
+  prepareModalDiagrams(0);
+
+  deformMult = 1;
+  diagMult = 1;
+  showDeform = true;
+  showM = false;
+  showT = false;
+  showN = false;
+  showStress = false;
+  showReactions = false;
+
+  renderSidebar();
+  render();
+  updateRunButton();
+  setStatusHint(`Obliczono drgania własne: ${out.modes.length} ${out.modes.length === 1 ? 'forma drgań' : 'formy drgań'} (Mod 1: f = ${fmtSmart(out.modes[0].f, 3)} Hz, T = ${fmtSmart(out.modes[0].T, 4)} s).`);
 }
 
 /* =========================================================================
@@ -3249,9 +3743,11 @@ function onKey(e){
   }
   if(e.key==='ArrowLeft'){
     if(solved && solved.type==='stability'){ e.preventDefault(); prevBucklingMode(); return; }
+    if(solved && solved.type==='modal'){ e.preventDefault(); prevModalMode(); return; }
   }
   if(e.key==='ArrowRight'){
     if(solved && solved.type==='stability'){ e.preventDefault(); nextBucklingMode(); return; }
+    if(solved && solved.type==='modal'){ e.preventDefault(); nextModalMode(); return; }
   }
   if(e.key==='v'||e.key==='V') setMode('select');
   if(e.key==='n'||e.key==='N') setMode('addNode');
@@ -3348,17 +3844,17 @@ let analysisCollapsed=false;
 function toggleAnalysisCollapse(){ analysisCollapsed=!analysisCollapsed; renderSidebar(); }
 
 function setAnalysisType(type){
-  if(!analysisSettings) analysisSettings = {type:'linear_static', params:{bucklingModes:4}};
+  if(!analysisSettings) analysisSettings = {type:'linear_static', params:{bucklingModes:4, modalModes:4, includeElementMass:true}};
   analysisSettings.type = type;
-  if(!analysisSettings.params) analysisSettings.params = {bucklingModes:4};
+  if(!analysisSettings.params) analysisSettings.params = {bucklingModes:4, modalModes:4, includeElementMass:true};
   invalidateResults();
   renderSidebar();
   render();
 }
 
 function updateAnalysisParam(key, val){
-  if(!analysisSettings) analysisSettings = {type:'linear_static', params:{bucklingModes:4}};
-  if(!analysisSettings.params) analysisSettings.params = {bucklingModes:4};
+  if(!analysisSettings) analysisSettings = {type:'linear_static', params:{bucklingModes:4, modalModes:4, includeElementMass:true}};
+  if(!analysisSettings.params) analysisSettings.params = {bucklingModes:4, modalModes:4, includeElementMass:true};
   analysisSettings.params[key] = val;
   invalidateResults();
   renderSidebar();
@@ -3367,11 +3863,7 @@ function updateAnalysisParam(key, val){
 
 function panelAnalysisType(){
   const type = (analysisSettings && analysisSettings.type) || 'linear_static';
-  const params = (analysisSettings && analysisSettings.params) || {bucklingModes:4};
-  const typeLabels = {
-    'linear_static': 'Statyka liniowa',
-    'stability': 'Stateczność (wyboczenie)'
-  };
+  const params = (analysisSettings && analysisSettings.params) || {bucklingModes:4, modalModes:4, includeElementMass:true};
   return `<div class="panel">
     <h3 class="collapsible-head" onclick="toggleAnalysisCollapse()">Rodzaj analizy <span class="subtle-icon">${analysisCollapsed?'▸':'▾'}</span></h3>
     <div id="analysisBody" style="${analysisCollapsed?'display:none;':''}">
@@ -3380,7 +3872,8 @@ function panelAnalysisType(){
           <label style="min-width:70px;">Analiza</label>
           <select id="analysisTypeSel" onchange="setAnalysisType(this.value)">
             <option value="linear_static" ${type==='linear_static'?'selected':''}>Statyka liniowa</option>
-            <option value="stability" ${type==='stability'?'selected':''}>Stateczność</option>
+            <option value="stability" ${type==='stability'?'selected':''}>Stateczność (wyboczenie)</option>
+            <option value="modal" ${type==='modal'?'selected':''}>Drgania własne (modalna)</option>
           </select>
         </div>
         ${type==='linear_static' ? `
@@ -3395,6 +3888,18 @@ function panelAnalysisType(){
           </div>
           <div class="muted" style="margin-top:6px;line-height:1.4;">
             Analiza wyboczeniowa / stateczności: wyznacza mnożniki obciążenia krytycznego i formy utraty stateczności.
+          </div>
+        ` : ''}
+        ${type==='modal' ? `
+          <div class="row" style="margin-top:8px;">
+            <label style="min-width:110px;">Liczba form drgań</label>
+            <input type="number" min="1" max="50" step="1" value="${params.modalModes||4}" onchange="updateAnalysisParam('modalModes', Math.max(1, parseInt(this.value)||1))" style="max-width:70px;">
+          </div>
+          <div class="checkline" style="margin-top:8px;">
+            <input type="checkbox" id="modalIncludeElemMass" ${(params.includeElementMass!==false)?'checked':''} onchange="updateAnalysisParam('includeElementMass', this.checked)"> Uwzględnij masę prętów
+          </div>
+          <div class="muted" style="margin-top:6px;line-height:1.4;">
+            Analiza modalna: wyznacza częstotliwości drgań f [Hz], okresy T [s], częstości kołowe ω [rad/s] oraz formy drgań z uwzględnieniem mas skupionych w węzłach i masy własnej prętów.
           </div>
         ` : ''}
       </div>
@@ -3434,10 +3939,10 @@ function restoreSnapshot(json){
   if(d.analysisSettings && typeof d.analysisSettings === 'object'){
     analysisSettings = {
       type: d.analysisSettings.type || 'linear_static',
-      params: Object.assign({ bucklingModes: 4 }, d.analysisSettings.params || {})
+      params: Object.assign({ bucklingModes: 4, modalModes: 4, includeElementMass: true }, d.analysisSettings.params || {})
     };
   } else {
-    analysisSettings = { type: 'linear_static', params: { bucklingModes: 4 } };
+    analysisSettings = { type: 'linear_static', params: { bucklingModes: 4, modalModes: 4, includeElementMass: true } };
   }
   nextNodeId=d.nextNodeId; nextElemId=d.nextElemId; nextMatId=d.nextMatId; nextSecId=d.nextSecId;
   defaultSectionId=d.defaultSectionId; defaultMaterialId=d.defaultMaterialId;
@@ -4147,6 +4652,9 @@ function panelResults(){
   if(solved.type === 'stability'){
     return panelStabilityResults();
   }
+  if(solved.type === 'modal'){
+    return panelModalResults();
+  }
   let html = `<div class="panel"><h3>Reakcje <span class="tag">rozwiązano</span></h3>`;
   if(solveWarning) html += `<div class="warn">${solveWarning}</div>`;
   html += reactionsTableHtml();
@@ -4154,6 +4662,77 @@ function panelResults(){
   html += diagramTogglesHtml();
   html += probePanelHtml();
   return html;
+}
+
+function panelModalResults(){
+  const modeIdx = solved.currentMode || 0;
+  const mode = solved.modes[modeIdx];
+  const totalModes = solved.modes.length;
+
+  const modeOptions = solved.modes.map((m, i) =>
+    `<option value="${i}" ${i===modeIdx?'selected':''}>Mod ${i+1}</option>`
+  ).join('');
+
+  return `
+  <div class="panel">
+    <h3>Drgania własne <span class="tag">Modalna</span></h3>
+    ${solveWarning ? `<div class="warn">${solveWarning}</div>` : ''}
+    
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span style="font-weight:600;font-size:12px;color:var(--text);">Forma drgań własnych</span>
+        <span class="muted">${modeIdx+1} z ${totalModes}</span>
+      </div>
+      
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
+        <button class="mini" onclick="prevModalMode()" title="Poprzednia forma (Strzałka w lewo)" ${totalModes<=1?'disabled':''}>◀ Poprzednia</button>
+        <select style="flex:1;min-width:0;text-align:center;" onchange="setModalMode(parseInt(this.value))">${modeOptions}</select>
+        <button class="mini" onclick="nextModalMode()" title="Następna forma (Strzałka w prawo)" ${totalModes<=1?'disabled':''}>Następna ▶</button>
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--surface-border-soft);border-radius:6px;padding:10px;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <span style="color:var(--text-dim);font-size:11.5px;">Częstotliwość f:</span>
+          <span style="font-family:var(--mono);font-weight:700;font-size:16px;color:var(--accent);">f = ${fmtSmart(mode.f, 3)} Hz</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;">
+          <span style="color:var(--text-dim);font-size:11px;">Okres drgań T:</span>
+          <span style="font-family:var(--mono);font-weight:600;font-size:12px;color:var(--text);">${fmtSmart(mode.T, 4)} s</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;">
+          <span style="color:var(--text-dim);font-size:11px;">Częstość kołowa ω:</span>
+          <span style="font-family:var(--mono);font-weight:600;font-size:12px;color:var(--text);">${fmtSmart(mode.omega, 2)} rad/s</span>
+        </div>
+        ${(mode.massRatioX != null && mode.massRatioY != null) ? `
+          <hr class="sep" style="margin:6px 0;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;">
+            <span style="color:var(--text-dim);font-size:11px;">Udział masowy m_eff:</span>
+            <span style="font-family:var(--mono);font-weight:600;font-size:11.5px;color:var(--text-dim);">X: ${mode.massRatioX.toFixed(1)}% &nbsp;|&nbsp; Y: ${mode.massRatioY.toFixed(1)}%</span>
+          </div>
+        ` : ''}
+      </div>
+
+      <div class="muted" style="line-height:1.45;">
+        Znormalizowana postać własna drgań (max deformacja = 1.0). Wykresy poniżej przedstawiają odpowiadające jej modalne siły wewnętrzne i naprężenia sprężyste.
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Widok wyników</h3>
+    ${diagToggleRow('Forma drgań (przemieszczenie)','showDeform',showDeform,'--def-color')}
+    ${showDeform ? deformSliderHtml() : ''}
+    <hr class="sep" style="margin:8px 0;">
+    <div style="font-weight:600;font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em;">Modalne siły i naprężenia</div>
+    ${diagToggleRow('Siła osiowa N_mod','showN',showN,'--n-color')}
+    ${diagToggleRow('Siła tnąca T_mod','showT',showT,'--t-color')}
+    ${diagToggleRow('Moment zginający M_mod','showM',showM,'--m-color')}
+    ${diagToggleRow('Naprężenia σ_mod','showStress',showStress,'--s-color')}
+    ${(showN||showT||showM||showStress) ? diagramSliderHtml() : ''}
+  </div>
+
+  ${probePanelHtml()}
+  `;
 }
 
 function panelStabilityResults(){
@@ -4313,6 +4892,27 @@ function probeReadoutHtml(){
       <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
       <div><span class="k">Naprężenie σ_cr góra</span><span class="v">${fmt(pr.sigTop/1000,2)} MPa</span></div>
       <div><span class="k">Naprężenie σ_cr dół</span><span class="v">${fmt(pr.sigBot/1000,2)} MPa</span></div>
+    </div>`;
+  }
+
+  if(solved.type === 'modal'){
+    const mode = solved.modes[solved.currentMode || 0];
+    const pr = mode.evalPoint(idx, x);
+    return `<div class="probeval">
+      <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
+      <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
+      <div><span class="k">Ux modalne (znormaliz.)</span><span class="v">${fmt(pr.Ux_global,3)}</span></div>
+      <div><span class="k">Uy modalne (znormaliz.)</span><span class="v">${fmt(pr.Uy_global,3)}</span></div>
+      <div><span class="k">u lokalne (osiowe)</span><span class="v">${fmt(pr.u_local,3)}</span></div>
+      <div><span class="k">v lokalne (poprzeczne)</span><span class="v">${fmt(pr.v_local,3)}</span></div>
+      <div><span class="k">Obrót θ modalny</span><span class="v">${fmt(pr.theta,3)}</span></div>
+      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
+      <div><span class="k">Siła osiowa N_mod</span><span class="v">${fmt(pr.N,3)} kN</span></div>
+      <div><span class="k">Siła tnąca T_mod</span><span class="v">${fmt(pr.V,3)} kN</span></div>
+      <div><span class="k">Moment zginający M_mod</span><span class="v">${fmt(pr.M,3)} kNm</span></div>
+      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
+      <div><span class="k">Naprężenie σ_mod góra</span><span class="v">${fmt(pr.sigTop/1000,2)} MPa</span></div>
+      <div><span class="k">Naprężenie σ_mod dół</span><span class="v">${fmt(pr.sigBot/1000,2)} MPa</span></div>
     </div>`;
   }
 
