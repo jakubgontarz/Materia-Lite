@@ -621,7 +621,390 @@ function pointResults(edRes,x){
   return {x,N,V,M,u_local:u,v_local:v,theta,Ux_global:Ux,Uy_global:Uy,sigTop,sigBot};
 }
 
-window.FEM = { solveModel, pointResults };
+function localGeometricStiffness(N, L){
+  const kg = zerosMat(6,6);
+  if(Math.abs(N) < 1e-12 || L < 1e-6) return kg;
+  const factor = N / L;
+  kg[1][1] = factor * 1.2;
+  kg[1][2] = factor * (L / 10);
+  kg[1][4] = factor * (-1.2);
+  kg[1][5] = factor * (L / 10);
+
+  kg[2][1] = factor * (L / 10);
+  kg[2][2] = factor * (2 * L * L / 15);
+  kg[2][4] = factor * (-L / 10);
+  kg[2][5] = factor * (-L * L / 30);
+
+  kg[4][1] = factor * (-1.2);
+  kg[4][2] = factor * (-L / 10);
+  kg[4][4] = factor * 1.2;
+  kg[4][5] = factor * (-L / 10);
+
+  kg[5][1] = factor * (L / 10);
+  kg[5][2] = factor * (-L * L / 30);
+  kg[5][4] = factor * (-L / 10);
+  kg[5][5] = factor * (2 * L * L / 15);
+  return kg;
+}
+
+function condenseKg(kg, kFull, condIdx){
+  if(condIdx.length===0) return kg.map(r=>r.slice());
+  const all=[0,1,2,3,4,5]; const R=all.filter(i=>!condIdx.includes(i)); const C=condIdx;
+  const Kcr=C.map(i=>R.map(j=>kFull[i][j])), Kcc=C.map(i=>C.map(j=>kFull[i][j]));
+  const KccInv=invSmall(Kcc);
+  const G=matMul(KccInv,Kcr);
+  const Gt=transpose(G);
+  const Kgrr=R.map(i=>R.map(j=>kg[i][j])), Kgrc=R.map(i=>C.map(j=>kg[i][j]));
+  const Kgcr=C.map(i=>R.map(j=>kg[i][j])), Kgcc=C.map(i=>C.map(j=>kg[i][j]));
+  const t1=matMul(Kgrc, G);
+  const t2=matMul(Gt, Kgcr);
+  const t3=matMul(Gt, matMul(Kgcc, G));
+  const kgOut=zerosMat(6,6);
+  for(let i=0;i<R.length;i++){
+    for(let j=0;j<R.length;j++){
+      kgOut[R[i]][R[j]] = Kgrr[i][j] - t1[i][j] - t2[i][j] + t3[i][j];
+    }
+  }
+  return kgOut;
+}
+
+function cholesky(A){
+  const n = A.length;
+  const L = zerosMat(n,n);
+  for(let i=0; i<n; i++){
+    for(let j=0; j<=i; j++){
+      let sum = 0;
+      for(let k=0; k<j; k++) sum += L[i][k] * L[j][k];
+      if(i === j){
+        const val = A[i][i] - sum;
+        if(val <= 1e-12) return null;
+        L[i][j] = Math.sqrt(val);
+      } else {
+        L[i][j] = (A[i][j] - sum) / (L[j][j] || 1e-12);
+      }
+    }
+  }
+  return L;
+}
+
+function solveL(L, b){
+  const n = L.length;
+  const x = zerosVec(n);
+  for(let i=0; i<n; i++){
+    let sum = 0;
+    for(let j=0; j<i; j++) sum += L[i][j] * x[j];
+    x[i] = (b[i] - sum) / (L[i][i] || 1e-12);
+  }
+  return x;
+}
+
+function solveLT(L, b){
+  const n = L.length;
+  const x = zerosVec(n);
+  for(let i=n-1; i>=0; i--){
+    let sum = 0;
+    for(let j=i+1; j<n; j++) sum += L[j][i] * x[j];
+    x[i] = (b[i] - sum) / (L[i][i] || 1e-12);
+  }
+  return x;
+}
+
+function jacobiSymmetric(M, maxIter=150, tol=1e-11){
+  const n = M.length;
+  let A = M.map(r=>r.slice());
+  let V = zerosMat(n,n);
+  for(let i=0; i<n; i++) V[i][i] = 1;
+
+  for(let iter=0; iter<maxIter; iter++){
+    let maxOff = 0;
+    for(let i=0; i<n; i++){
+      for(let j=i+1; j<n; j++){
+        maxOff = Math.max(maxOff, Math.abs(A[i][j]));
+      }
+    }
+    if(maxOff < tol) break;
+
+    for(let p=0; p<n; p++){
+      for(let q=p+1; q<n; q++){
+        const apq = A[p][q];
+        if(Math.abs(apq) < 1e-15) continue;
+        const app = A[p][p], aqq = A[q][q];
+        const theta = 0.5 * Math.atan2(2 * apq, aqq - app);
+        const c = Math.cos(theta), s = Math.sin(theta);
+
+        const App = c*c*app - 2*s*c*apq + s*s*aqq;
+        const Aqq = s*s*app + 2*s*c*apq + c*c*aqq;
+        A[p][p] = App;
+        A[q][q] = Aqq;
+        A[p][q] = 0;
+        A[q][p] = 0;
+
+        for(let k=0; k<n; k++){
+          if(k !== p && k !== q){
+            const akp = A[k][p], akq = A[k][q];
+            A[k][p] = c*akp - s*akq;
+            A[p][k] = A[k][p];
+            A[k][q] = s*akp + c*akq;
+            A[q][k] = A[k][q];
+          }
+          const vkp = V[k][p], vkq = V[k][q];
+          V[k][p] = c*vkp - s*vkq;
+          V[k][q] = s*vkp + c*vkq;
+        }
+      }
+    }
+  }
+  const eigenvalues = [];
+  for(let i=0; i<n; i++) eigenvalues.push(A[i][i]);
+  return { eigenvalues, eigenvectors: V };
+}
+
+function solveStability(model, maxModes=4){
+  const staticSol = solveModel(model);
+  if(staticSol.singular){
+    return { singular: true, modes: [], staticSolved: staticSol };
+  }
+
+  const nodes = model.nodes;
+  const nodeIndex = staticSol.nodeIndex;
+  const nDof = 3 * nodes.length;
+  let KG = zerosMat(nDof, nDof);
+
+  let hasCompression = false;
+  staticSol.elemData.forEach((ed, idx)=>{
+    const edRes = staticSol.results[idx];
+    const pr0 = pointResults(edRes, 0);
+    const prL = pointResults(edRes, edRes.L);
+    const Navg = (pr0.N + prL.N) / 2;
+    if(Navg < -1e-6) hasCompression = true;
+
+    const kgFull = localGeometricStiffness(Navg, ed.L);
+    const kgCond = condenseKg(kgFull, ed.kFull, ed.condIdx);
+    const T = [[ed.c,ed.s,0,0,0,0],[-ed.s,ed.c,0,0,0,0],[0,0,1,0,0,0],
+               [0,0,0,ed.c,ed.s,0],[0,0,0,-ed.s,ed.c,0],[0,0,0,0,0,1]];
+    const Tt = transpose(T);
+    const kgGlobal = matMul(matMul(Tt, kgCond), T);
+    for(let i=0; i<6; i++){
+      for(let j=0; j<6; j++){
+        KG[ed.dofMap[i]][ed.dofMap[j]] += kgGlobal[i][j];
+      }
+    }
+  });
+
+  const Lambda = zerosMat(nDof, nDof);
+  for(let i=0; i<nDof; i++) Lambda[i][i] = 1;
+  const supportMap = {};
+  (model.supports||[]).forEach(sp => { supportMap[sp.nodeId] = sp; });
+  nodes.forEach((n, i)=>{
+    const sp = supportMap[n.id];
+    if(sp && sp.angleDeg){
+      const a = sp.angleDeg*Math.PI/180, c = Math.cos(a), s = Math.sin(a);
+      const iu = 3*i, iv = 3*i+1;
+      Lambda[iu][iu] = c; Lambda[iu][iv] = -s; Lambda[iv][iu] = s; Lambda[iv][iv] = c;
+    }
+  });
+  const LambdaT = transpose(Lambda);
+
+  let K = zerosMat(nDof, nDof);
+  staticSol.elemData.forEach(ed => {
+    for(let i=0; i<6; i++){
+      for(let j=0; j<6; j++) K[ed.dofMap[i]][ed.dofMap[j]] += ed.kGlobal[i][j];
+    }
+  });
+
+  let Kp = matMul(matMul(LambdaT, K), Lambda);
+  let KGp = matMul(matMul(LambdaT, KG), Lambda);
+
+  const isFixed = new Array(nDof).fill(false);
+  nodes.forEach((n, i)=>{
+    const sp = supportMap[n.id]; if(!sp) return;
+    const dirs = [{c:sp.ux, dof:3*i+0}, {c:sp.uy, dof:3*i+1}, {c:sp.rz, dof:3*i+2}];
+    dirs.forEach(({c, dof})=>{
+      if(!c || c.type==='free') return;
+      if(c.type==='fixed'){ isFixed[dof] = true; }
+      else if(c.type==='spring'){ Kp[dof][dof] += c.k; }
+    });
+  });
+
+  let maxDiag = 0;
+  for(let i=0; i<nDof; i++) maxDiag = Math.max(maxDiag, Math.abs(Kp[i][i]));
+  const floatTol = Math.max(maxDiag, 1) * 1e-9;
+  for(let i=0; i<nDof; i++){
+    if(!isFixed[i] && Math.abs(Kp[i][i]) < floatTol){ isFixed[i] = true; }
+  }
+
+  const freeIdx = [];
+  for(let i=0; i<nDof; i++){ if(!isFixed[i]) freeIdx.push(i); }
+
+  if(freeIdx.length === 0){
+    return { singular: false, noCompression: true, modes: [], staticSolved: staticSol };
+  }
+
+  const Kff = freeIdx.map(i => freeIdx.map(j => Kp[i][j]));
+  const KGff = freeIdx.map(i => freeIdx.map(j => KGp[i][j]));
+  const nFree = freeIdx.length;
+
+  const B = zerosMat(nFree, nFree);
+  for(let i=0; i<nFree; i++){
+    for(let j=0; j<nFree; j++){
+      B[i][j] = -KGff[i][j];
+    }
+  }
+
+  let L = cholesky(Kff);
+  if(!L){
+    // regularize slightly if boundary between stable/singular
+    const regKff = Kff.map((row, i) => row.map((v, j) => (i===j ? v + 1e-7 * maxDiag : v)));
+    L = cholesky(regKff);
+    if(!L){
+      return { singular: true, modes: [], staticSolved: staticSol };
+    }
+  }
+
+  const Y = zerosMat(nFree, nFree);
+  for(let col=0; col<nFree; col++){
+    const bCol = B.map(row => row[col]);
+    const yCol = solveL(L, bCol);
+    for(let row=0; row<nFree; row++) Y[row][col] = yCol[row];
+  }
+
+  const Btilde = zerosMat(nFree, nFree);
+  for(let row=0; row<nFree; row++){
+    const yRow = Y[row];
+    const bRow = solveL(L, yRow);
+    for(let col=0; col<nFree; col++) Btilde[row][col] = bRow[col];
+  }
+
+  for(let i=0; i<nFree; i++){
+    for(let j=i+1; j<nFree; j++){
+      const avg = (Btilde[i][j] + Btilde[j][i]) / 2;
+      Btilde[i][j] = avg;
+      Btilde[j][i] = avg;
+    }
+  }
+
+  const { eigenvalues: mu, eigenvectors: V } = jacobiSymmetric(Btilde, 200, 1e-12);
+
+  const rawModes = [];
+  for(let k=0; k<nFree; k++){
+    const val = mu[k];
+    if(val > 1e-9){
+      const alphaCr = 1 / val;
+      const y_k = V.map(row => row[k]);
+      const phi_free = solveLT(L, y_k);
+
+      const Dp = zerosVec(nDof);
+      freeIdx.forEach((gi, idx) => { Dp[gi] = phi_free[idx]; });
+      const D = matVec(Lambda, Dp);
+
+      rawModes.push({ alphaCr, D });
+    }
+  }
+
+  rawModes.sort((a, b) => a.alphaCr - b.alphaCr);
+  const selectedRawModes = rawModes.slice(0, maxModes);
+
+  const modes = selectedRawModes.map((rm, modeIndex) => {
+    const alphaCr = rm.alphaCr;
+    let D = rm.D;
+
+    const elemResults = staticSol.elemData.map(ed => {
+      const dg = ed.dofMap.map(i => D[i]);
+      const T = [[ed.c,ed.s,0,0,0,0],[-ed.s,ed.c,0,0,0,0],[0,0,1,0,0,0],
+                 [0,0,0,ed.c,ed.s,0],[0,0,0,-ed.s,ed.c,0],[0,0,0,0,0,1]];
+      const dLocalRaw = matVec(T, dg);
+      const dLocal = backSubstitute(ed.kFull, zerosVec(6), dLocalRaw, ed.condIdx);
+      return { el: ed.el, L: ed.L, c: ed.c, s: ed.s, dLocal };
+    });
+
+    let maxDisp = 0;
+    elemResults.forEach(er => {
+      for(let step=0; step<=20; step++){
+        const x = er.L * step / 20;
+        const [N1, N2] = shapeN_axial(x, er.L);
+        const [H1, H2, H3, H4] = shapeH_bend(x, er.L);
+        const u = N1*er.dLocal[0] + N2*er.dLocal[3];
+        const v = H1*er.dLocal[1] + H2*er.dLocal[2] + H3*er.dLocal[4] + H4*er.dLocal[5];
+        const Ux = er.c * u - er.s * v;
+        const Uy = er.s * u + er.c * v;
+        maxDisp = Math.max(maxDisp, Math.hypot(Ux, Uy));
+      }
+    });
+
+    if(maxDisp > 1e-12){
+      const norm = 1.0 / maxDisp;
+      D = D.map(v => v * norm);
+      elemResults.forEach(er => {
+        er.dLocal = er.dLocal.map(v => v * norm);
+      });
+    }
+
+    let maxNcr = null;
+    let minNcrVal = Infinity;
+    staticSol.results.forEach(res => {
+      const pr0 = pointResults(res, 0);
+      const prL = pointResults(res, res.L);
+      const n0 = alphaCr * pr0.N;
+      const nL = alphaCr * prL.N;
+      minNcrVal = Math.min(minNcrVal, n0, nL);
+    });
+    if(minNcrVal < 0){
+      maxNcr = Math.abs(minNcrVal);
+    }
+
+    function evalPoint(elIdx, x, staticPr){
+      const er = elemResults[elIdx];
+      const L = er.L;
+      const [N1, N2] = shapeN_axial(x, L);
+      const [H1, H2, H3, H4] = shapeH_bend(x, L);
+      const u = N1*er.dLocal[0] + N2*er.dLocal[3];
+      const v = H1*er.dLocal[1] + H2*er.dLocal[2] + H3*er.dLocal[4] + H4*er.dLocal[5];
+      const xi = x / L;
+      const dH1 = (-6*xi + 6*xi*xi) / L;
+      const dH2 = (1 - 4*xi + 3*xi*xi);
+      const dH3 = (6*xi - 6*xi*xi) / L;
+      const dH4 = (-2*xi + 3*xi*xi);
+      const theta = dH1*er.dLocal[1] + dH2*er.dLocal[2] + dH3*er.dLocal[4] + dH4*er.dLocal[5];
+
+      const Ux = er.c * u - er.s * v;
+      const Uy = er.s * u + er.c * v;
+
+      return {
+        x,
+        N: alphaCr * staticPr.N,
+        V: alphaCr * staticPr.V,
+        M: alphaCr * staticPr.M,
+        u_local: u,
+        v_local: v,
+        theta,
+        Ux_global: Ux,
+        Uy_global: Uy,
+        sigTop: alphaCr * staticPr.sigTop,
+        sigBot: alphaCr * staticPr.sigBot
+      };
+    }
+
+    return {
+      modeIndex,
+      alphaCr,
+      D,
+      results: elemResults,
+      maxNcr,
+      evalPoint
+    };
+  });
+
+  return {
+    modes,
+    staticSolved: staticSol,
+    elemData: staticSol.elemData,
+    nodeIndex: staticSol.nodeIndex,
+    singular: false,
+    noCompression: !hasCompression || modes.length === 0
+  };
+}
+
+window.FEM = { solveModel, solveStability, pointResults };
 })();
 
 /* =========================================================================
@@ -1185,12 +1568,126 @@ function runLinearStaticAnalysis(){
   updateRunButton();
 }
 
+function prepareBucklingDiagrams(modeIndex){
+  if(!solved || solved.type!=='stability' || !solved.modes || !solved.modes.length) return;
+  const mode = solved.modes[modeIndex];
+  if(!mode) return;
+  solved.currentMode = modeIndex;
+
+  diagrams = {};
+  let maxDisp = 0, maxM = 0, maxT = 0, maxN = 0, maxS = 0;
+  const NSAMP = 40;
+
+  solved.elemData.forEach((ed, idx)=>{
+    const elId = elements[idx].id;
+    const staticEdRes = solved.staticSolved.results[idx];
+    const pts = [];
+    for(let i=0; i<=NSAMP; i++){
+      const x = ed.L * i / NSAMP;
+      const staticPr = FEM.pointResults(staticEdRes, x);
+      const ptMode = mode.evalPoint(idx, x, staticPr);
+      pts.push(ptMode);
+      maxDisp = Math.max(maxDisp, Math.hypot(ptMode.Ux_global, ptMode.Uy_global));
+      maxM = Math.max(maxM, Math.abs(ptMode.M));
+      maxT = Math.max(maxT, Math.abs(ptMode.V));
+      maxN = Math.max(maxN, Math.abs(ptMode.N));
+      maxS = Math.max(maxS, Math.abs(ptMode.sigTop), Math.abs(ptMode.sigBot));
+    }
+    diagrams[elId] = { pts, L: ed.L, c: ed.c, s: ed.s, n1: getNode(elements[idx].n1) };
+  });
+
+  const bbox = modelBBox();
+  const diag = Math.hypot(bbox.maxX - bbox.minX, bbox.maxY - bbox.minY) || 10;
+  autoDeform = maxDisp > 1e-9 ? (0.15 * diag) / maxDisp : 1;
+  autoDiagM = maxM > 1e-9 ? (0.14 * diag) / maxM : 1;
+  autoDiagT = maxT > 1e-9 ? (0.14 * diag) / maxT : 1;
+  autoDiagN = maxN > 1e-9 ? (0.14 * diag) / maxN : 1;
+  autoDiagS = maxS > 1e-9 ? (0.14 * diag) / maxS : 1;
+  magM = maxM; magT = maxT; magN = maxN; magS = maxS;
+  magReaction = Math.max(...(solved.Rglobal || []).map(v => Math.abs(v)), 0);
+  if(elements.length && probe.elId == null) probe.elId = elements[0].id;
+}
+
+function setBucklingMode(idx){
+  if(!solved || solved.type!=='stability' || !solved.modes || !solved.modes[idx]) return;
+  prepareBucklingDiagrams(idx);
+  renderSidebar();
+  render();
+}
+
+function prevBucklingMode(){
+  if(!solved || solved.type!=='stability' || !solved.modes || solved.modes.length<=1) return;
+  const cur = solved.currentMode || 0;
+  const next = cur > 0 ? cur - 1 : solved.modes.length - 1;
+  setBucklingMode(next);
+}
+
+function nextBucklingMode(){
+  if(!solved || solved.type!=='stability' || !solved.modes || solved.modes.length<=1) return;
+  const cur = solved.currentMode || 0;
+  const next = cur < solved.modes.length - 1 ? cur + 1 : 0;
+  setBucklingMode(next);
+}
+
 function runStabilityAnalysis(){
-  const modes = (analysisSettings && analysisSettings.params && analysisSettings.params.bucklingModes) || 4;
-  setStatusHint(`Wybrano analizę stateczności (liczba modów: ${modes}). Moduł solvera wyboczeniowego zostanie zaimplementowany.`);
-  solveWarning = `Analiza stateczności (${modes} mody): moduł obliczeń wyboczeniowych jest przygotowany do rozszerzenia o solver macierzy geometrycznej Kg.`;
-  solved=null; diagrams=null;
-  renderSidebar(); render(); updateRunButton();
+  if(nodes.length<2 || elements.length<1){
+    solveWarning='Dodaj co najmniej dwa węzły i jeden pręt, aby uruchomić obliczenia.';
+    solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+  const hasAnySupport = nodes.some(n=>n.support && (
+    (n.support.ux&&n.support.ux.type!=='free') || (n.support.uy&&n.support.uy.type!=='free') || (n.support.rz&&n.support.rz.type!=='free')));
+  if(!hasAnySupport){
+    solveWarning='Model nie ma zdefiniowanych podpór — układ jest niestabilny.';
+    solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  const model = buildSolverModel();
+  const modesCount = (analysisSettings && analysisSettings.params && analysisSettings.params.bucklingModes) || 4;
+  let out;
+  try{
+    out = FEM.solveStability(model, modesCount);
+  } catch(e){
+    solveWarning = 'Błąd analizy stateczności: ' + e.message;
+    solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  if(out.singular){
+    solveWarning = 'Układ może być geometrycznie niestabilny lub niedostatecznie podparty — solver nie mógł wyznaczyć macierzy sztywności.';
+    solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  if(out.noCompression || !out.modes || out.modes.length === 0){
+    solveWarning = 'W układzie nie stwierdzono dodatnich mnożników wyboczeniowych (brak elementów ściskanych lub siły ściskające są znikome dla zadanego kierunku obciążeń).';
+    solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  solved = {
+    type: 'stability',
+    modes: out.modes,
+    currentMode: 0,
+    staticSolved: out.staticSolved,
+    elemData: out.elemData,
+    nodeIndex: out.nodeIndex,
+    Rglobal: out.staticSolved.Rglobal,
+    results: out.staticSolved.results
+  };
+
+  solveWarning = null;
+  prepareBucklingDiagrams(0);
+
+  deformMult = 1;
+  diagMult = 1;
+  showDeform = true;
+  showM = false;
+  showT = false;
+  showN = false;
+  showStress = false;
+  showReactions = false;
+
+  renderSidebar();
+  render();
+  updateRunButton();
+  setStatusHint(`Obliczono stateczność: ${out.modes.length} ${out.modes.length===1?'forma wyboczenia':'formy wyboczenia'} (Mod 1: α_cr = ${fmtSmart(out.modes[0].alphaCr, 3)}).`);
 }
 
 /* =========================================================================
@@ -2750,6 +3247,12 @@ function onKey(e){
     }
     return;
   }
+  if(e.key==='ArrowLeft'){
+    if(solved && solved.type==='stability'){ e.preventDefault(); prevBucklingMode(); return; }
+  }
+  if(e.key==='ArrowRight'){
+    if(solved && solved.type==='stability'){ e.preventDefault(); nextBucklingMode(); return; }
+  }
   if(e.key==='v'||e.key==='V') setMode('select');
   if(e.key==='n'||e.key==='N') setMode('addNode');
   if(e.key==='b'||e.key==='B') setMode('addBar');
@@ -3641,6 +4144,9 @@ function panelResults(){
   if(!solved){
     return `<div class="panel"><h3>Wyniki</h3><div class="empty-state">Zbuduj model i kliknij <b>OBLICZ</b> w górnym pasku,<br>aby zobaczyć odkształcenia, wykresy M/T/N i naprężenia.</div></div>`;
   }
+  if(solved.type === 'stability'){
+    return panelStabilityResults();
+  }
   let html = `<div class="panel"><h3>Reakcje <span class="tag">rozwiązano</span></h3>`;
   if(solveWarning) html += `<div class="warn">${solveWarning}</div>`;
   html += reactionsTableHtml();
@@ -3648,6 +4154,80 @@ function panelResults(){
   html += diagramTogglesHtml();
   html += probePanelHtml();
   return html;
+}
+
+function panelStabilityResults(){
+  const modeIdx = solved.currentMode || 0;
+  const mode = solved.modes[modeIdx];
+  const totalModes = solved.modes.length;
+
+  let ec3Badge = '';
+  let ec3Text = '';
+  if(mode.alphaCr >= 10.0){
+    ec3Badge = `<span class="tag" style="font-weight:600;">α_cr ≥ 10 — Układ sztywny</span>`;
+    ec3Text = `Zgodnie z <b>PN-EN 1993-1-1</b>: efekty II rzędu zwiększają siły o mniej niż 10%. Wystarczy standardowa statyka liniowa I rzędu.`;
+  } else if(mode.alphaCr >= 1.0){
+    ec3Badge = `<span class="tag" style="font-weight:600;">1.0 ≤ α_cr < 10 — Wymagana analiza II rzędu</span>`;
+    ec3Text = `Zgodnie z <b>PN-EN 1993-1-1</b>: konstrukcja jest wrażliwa na deformacje. Wymagane jest uwzględnienie efektów II rzędu lub globalnych i lokalnych imperfekcji z długościami wyboczeniowymi.`;
+  } else {
+    ec3Badge = `<span class="tag" style="font-weight:600;">α_cr < 1.0 — Niestateczność!</span>`;
+    ec3Text = `<b>UWAGA:</b> Obciążenie obliczeniowe przekracza nośność krytyczną konstrukcji (wyboczenie nastąpi przed osiągnięciem pełnego obciążenia).`;
+  }
+
+  const modeOptions = solved.modes.map((m, i) =>
+    `<option value="${i}" ${i===modeIdx?'selected':''}>Mod ${i+1}</option>`
+  ).join('');
+
+  return `
+  <div class="panel">
+    <h3>Stateczność <span class="tag">Wyboczenie</span></h3>
+    ${solveWarning ? `<div class="warn">${solveWarning}</div>` : ''}
+    
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span style="font-weight:600;font-size:12px;color:var(--text);">Forma utraty stateczności</span>
+        <span class="muted">${modeIdx+1} z ${totalModes}</span>
+      </div>
+      
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
+        <button class="mini" onclick="prevBucklingMode()" title="Poprzednia forma (Strzałka w lewo)" ${totalModes<=1?'disabled':''}>◀ Poprzednia</button>
+        <select style="flex:1;min-width:0;text-align:center;" onchange="setBucklingMode(parseInt(this.value))">${modeOptions}</select>
+        <button class="mini" onclick="nextBucklingMode()" title="Następna forma (Strzałka w prawo)" ${totalModes<=1?'disabled':''}>Następna ▶</button>
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--surface-border-soft);border-radius:6px;padding:10px;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;">
+          <span style="color:var(--text-dim);font-size:11.5px;">Mnożnik krytyczny:</span>
+          <span style="font-family:var(--mono);font-weight:700;font-size:16px;color:var(--accent);">α_cr = ${fmtSmart(mode.alphaCr, 3)}</span>
+        </div>
+        ${mode.maxNcr != null ? `
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;">
+            <span style="color:var(--text-dim);font-size:11px;">Maks. siła ściskająca N_cr:</span>
+            <span style="font-family:var(--mono);font-weight:600;font-size:12px;color:var(--danger);">${fmtSmart(mode.maxNcr, 2)} kN</span>
+          </div>
+        ` : ''}
+        <div style="margin-top:8px;">${ec3Badge}</div>
+      </div>
+
+      <div class="muted" style="line-height:1.45;">${ec3Text}</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Widok wyników</h3>
+    ${diagToggleRow('Forma wyboczenia (deformacja)','showDeform',showDeform,'--def-color')}
+    ${showDeform ? deformSliderHtml() : ''}
+    <hr class="sep" style="margin:8px 0;">
+    <div style="font-weight:600;font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em;">Siły w stanie krytycznym (N_cr = α_cr · N)</div>
+    ${diagToggleRow('Siła osiowa N_cr','showN',showN,'--n-color')}
+    ${diagToggleRow('Siła tnąca T_cr','showT',showT,'--t-color')}
+    ${diagToggleRow('Moment zginający M_cr','showM',showM,'--m-color')}
+    ${diagToggleRow('Naprężenia σ_cr','showStress',showStress,'--s-color')}
+    ${(showN||showT||showM||showStress) ? diagramSliderHtml() : ''}
+  </div>
+
+  ${probePanelHtml()}
+  `;
 }
 function reactionsTableHtml(){
   const supNodes = nodes.filter(n=>n.support);
@@ -3712,6 +4292,30 @@ function probePanelHtml(){
 function probeReadoutHtml(){
   const dg=diagrams[probe.elId]; const x=probe.t*dg.L;
   const idx = elements.findIndex(e=>e.id===probe.elId);
+
+  if(solved.type === 'stability'){
+    const mode = solved.modes[solved.currentMode || 0];
+    const staticEdRes = solved.staticSolved.results[idx];
+    const staticPr = FEM.pointResults(staticEdRes, x);
+    const pr = mode.evalPoint(idx, x, staticPr);
+    return `<div class="probeval">
+      <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
+      <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
+      <div><span class="k">Ux modalne (znormaliz.)</span><span class="v">${fmt(pr.Ux_global,3)}</span></div>
+      <div><span class="k">Uy modalne (znormaliz.)</span><span class="v">${fmt(pr.Uy_global,3)}</span></div>
+      <div><span class="k">u lokalne (osiowe)</span><span class="v">${fmt(pr.u_local,3)}</span></div>
+      <div><span class="k">v lokalne (poprzeczne)</span><span class="v">${fmt(pr.v_local,3)}</span></div>
+      <div><span class="k">Obrót θ modalny</span><span class="v">${fmt(pr.theta,3)}</span></div>
+      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
+      <div><span class="k">Siła osiowa N_cr</span><span class="v">${fmt(pr.N,3)} kN</span></div>
+      <div><span class="k">Siła tnąca T_cr</span><span class="v">${fmt(pr.V,3)} kN</span></div>
+      <div><span class="k">Moment zginający M_cr</span><span class="v">${fmt(pr.M,3)} kNm</span></div>
+      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
+      <div><span class="k">Naprężenie σ_cr góra</span><span class="v">${fmt(pr.sigTop/1000,2)} MPa</span></div>
+      <div><span class="k">Naprężenie σ_cr dół</span><span class="v">${fmt(pr.sigBot/1000,2)} MPa</span></div>
+    </div>`;
+  }
+
   const edRes = solved.results[idx];
   const pr = FEM.pointResults(edRes,x);
   return `<div class="probeval">
