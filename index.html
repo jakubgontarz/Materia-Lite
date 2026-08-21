@@ -260,6 +260,11 @@
     color:#e2e8f0;border-radius:8px;padding:10px;margin-top:8px;}
   .probeval div span.k{color:#94a3b8;font-family:var(--sans);display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;}
   .probeval div span.v{font-size:13px;}
+  table.probetable{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;background:var(--surface);border:1px solid var(--surface-border-soft);border-radius:6px;overflow:hidden;margin-top:6px;}
+  table.probetable th{text-align:right;font-family:var(--sans);color:var(--text-dim);font-weight:600;font-size:10px;padding:4px 6px;background:var(--surface-2);border-bottom:1px solid var(--surface-border-soft);}
+  table.probetable td{text-align:right;padding:4px 6px;border-bottom:1px solid var(--surface-border-soft);}
+  table.probetable th:first-child, table.probetable td:first-child{text-align:left;}
+  table.probetable tr:last-child td{border-bottom:none;}
   .warn{background:#fff7ed;border:1px solid #fdba74;color:#9a3412;padding:8px 10px;border-radius:7px;font-size:11.5px;margin-bottom:8px;}
   .collapsible-head{cursor:pointer;user-select:none;}
   .subtle-icon{opacity:.6;}
@@ -1572,7 +1577,449 @@ function solveHarmonic(model, freqHz=1.0, options={}){
   };
 }
 
-window.FEM = { solveModel, solveStability, solveModal, solveHarmonic, pointResults };
+/* =========================================================================
+   INFLUENCE LINES — kinematic method (Müller-Breslau principle)
+   ---------------------------------------------------------------------
+   To get the influence line for an internal force S (N, T or M) at a chosen
+   cross-section (the start or end node of a chosen bar), we do NOT move a
+   unit load across the structure and re-solve many times. Instead we solve
+   the SAME structure ONCE more, loaded only with a special self-equilibrated
+   nodal force pattern F_B, built directly from one column of that bar's own
+   local stiffness matrix (the column that is conjugate to S at that end).
+   By Betti's reciprocal theorem this F_B is exactly the load whose virtual
+   work against ANY compatible displacement field reproduces S at that
+   section under that field — so the resulting deflected shape (read as the
+   LOCAL transverse displacement v(x) along every bar, i.e. the response to
+   a unit load that always travels perpendicular to whichever bar it is
+   currently on) IS the influence line for S, to scale 1, for both
+   determinate AND indeterminate structures. This is the matrix-method
+   realization of the classical Müller-Breslau "unit dislocation" principle,
+   and needs only one extra linear solve (not one solve per load position).
+   ========================================================================= */
+const IL_COLS = {N:{start:0,end:3}, T:{start:1,end:4}, M:{start:2,end:5}};
+const IL_SIGNS = {N:{start:1,end:-1}, T:{start:-1,end:1}, M:{start:1,end:-1}};
+
+function solveInfluenceLine(model, targetElId, end, forceType){
+  const nodes=model.nodes;
+  const nodeIndex={};
+  nodes.forEach((n,i)=>nodeIndex[n.id]=i);
+  const nDof=3*nodes.length;
+  let K=zerosMat(nDof,nDof), F=zerosVec(nDof);
+
+  const colIdx = IL_COLS[forceType][end];
+  const sign = IL_SIGNS[forceType][end];
+
+  const elemData=model.elements.map(el=>{
+    const n1=nodes[nodeIndex[el.n1]], n2=nodes[nodeIndex[el.n2]];
+    const dx=n2.x-n1.x, dy=n2.y-n1.y;
+    const L=Math.sqrt(dx*dx+dy*dy)||1e-6;
+    const c=dx/L, s=dy/L;
+    const kFull=localStiffness(el.E,el.A,el.I,L);
+    // structural properties only — an influence line is a property of the
+    // STRUCTURE, so any current q/thermal/settlement loading on this element
+    // must be ignored for this auxiliary solve (kept only for pointResults'
+    // stress readout, which is harmless since sigma isn't used here).
+    const elClean={id:el.id,n1:el.n1,n2:el.n2,E:el.E,A:el.A,A_real:el.A_real,I:el.I,
+                    h:el.h,cTop:el.cTop,cBot:el.cBot,hingeStart:!!el.hingeStart,hingeEnd:!!el.hingeEnd};
+    const fFull=zerosVec(6);
+    const condIdx=[];
+    if(el.hingeStart) condIdx.push(2);
+    if(el.hingeEnd) condIdx.push(5);
+    const {k:kCond}=condense(kFull,fFull,condIdx);
+    const T=[[c,s,0,0,0,0],[-s,c,0,0,0,0],[0,0,1,0,0,0],[0,0,0,c,s,0],[0,0,0,-s,c,0],[0,0,0,0,0,1]];
+    const Tt=transpose(T);
+    const kGlobal=matMul(matMul(Tt,kCond),T);
+    let fGlobal=zerosVec(6);
+    if(el.id===targetElId){
+      // Use condensed matrix so hinged DOFs carry no force/moment
+      const fLocal=kCond.map(row=>row[colIdx]*sign);
+      fGlobal=matVec(Tt,fLocal);
+    }
+    const dofMap=[3*nodeIndex[el.n1]+0,3*nodeIndex[el.n1]+1,3*nodeIndex[el.n1]+2,
+                  3*nodeIndex[el.n2]+0,3*nodeIndex[el.n2]+1,3*nodeIndex[el.n2]+2];
+    return {el:elClean,n1,n2,L,c,s,kFull,fFull,condIdx,kCond,kGlobal,fGlobal,dofMap};
+  });
+
+  for(const ed of elemData){
+    for(let i=0;i<6;i++){
+      F[ed.dofMap[i]]+=ed.fGlobal[i];
+      for(let j=0;j<6;j++) K[ed.dofMap[i]][ed.dofMap[j]]+=ed.kGlobal[i][j];
+    }
+  }
+
+  const Lambda=zerosMat(nDof,nDof);
+  for(let i=0;i<nDof;i++) Lambda[i][i]=1;
+  const supportMap={};
+  (model.supports||[]).forEach(sp=>{supportMap[sp.nodeId]=sp;});
+  nodes.forEach((n,i)=>{
+    const sp=supportMap[n.id];
+    if(sp && sp.angleDeg){
+      const a=sp.angleDeg*Math.PI/180, c=Math.cos(a), s=Math.sin(a);
+      const iu=3*i, iv=3*i+1;
+      Lambda[iu][iu]=c; Lambda[iu][iv]=-s; Lambda[iv][iu]=s; Lambda[iv][iv]=c;
+    }
+  });
+  const LambdaT=transpose(Lambda);
+  let Kp=matMul(matMul(LambdaT,K),Lambda);
+  let Fp=matVec(LambdaT,F);
+
+  // support restraint TYPES matter (they're part of the structure), but any
+  // prescribed settlement (delta) is a load-case detail, not a structural
+  // property — it is intentionally ignored for the influence-line solve.
+  const isFixed=new Array(nDof).fill(false);
+  const fixedValue=new Array(nDof).fill(0);
+  nodes.forEach((n,i)=>{
+    const sp=supportMap[n.id]; if(!sp) return;
+    const dirs=[{c:sp.ux,dof:3*i+0},{c:sp.uy,dof:3*i+1},{c:sp.rz,dof:3*i+2}];
+    dirs.forEach(({c,dof})=>{
+      if(!c||c.type==='free') return;
+      if(c.type==='fixed'){ isFixed[dof]=true; }
+      else if(c.type==='spring'){ Kp[dof][dof]+=c.k; }
+    });
+  });
+
+  const freeIdx=[], fixedIdx=[];
+  let maxDiag=0;
+  for(let i=0;i<nDof;i++) maxDiag=Math.max(maxDiag, Math.abs(Kp[i][i]));
+  const floatTol = Math.max(maxDiag,1)*1e-9;
+  for(let i=0;i<nDof;i++){
+    if(!isFixed[i] && Math.abs(Kp[i][i])<floatTol){ isFixed[i]=true; fixedValue[i]=0; }
+  }
+  for(let i=0;i<nDof;i++){ if(isFixed[i]) fixedIdx.push(i); else freeIdx.push(i); }
+  const Kff=freeIdx.map(i=>freeIdx.map(j=>Kp[i][j]));
+  const Kfc=freeIdx.map(i=>fixedIdx.map(j=>Kp[i][j]));
+  const Uc=fixedIdx.map(i=>fixedValue[i]);
+  const Ff=freeIdx.map(i=>Fp[i]);
+  const rhs=Ff.map((val,i)=>val-matVec([Kfc[i]],Uc)[0]);
+  let singular=false;
+  const lsol = freeIdx.length>0 ? solveLinSys(Kff,rhs) : {x:[],singular:false};
+  const Uf=lsol.x; singular=lsol.singular;
+
+  const Dp=zerosVec(nDof);
+  freeIdx.forEach((gi,i)=>{Dp[gi]=Uf[i];});
+  fixedIdx.forEach((gi,i)=>{Dp[gi]=Uc[i];});
+  const D=matVec(Lambda,Dp);
+
+  const targetEd = elemData.find(ed=>ed.el.id===targetElId);
+  const isTargetHingedAtDislocation = targetEd ? targetEd.condIdx.includes(colIdx) : false;
+
+  let dDislocation = zerosVec(6);
+  if(targetEd && !isTargetHingedAtDislocation){
+    const e_disloc = zerosVec(6);
+    e_disloc[colIdx] = sign;
+    dDislocation = backSubstitute(targetEd.kFull, zerosVec(6), e_disloc, targetEd.condIdx);
+  }
+
+  const results=elemData.map(ed=>{
+    const dg=ed.dofMap.map(i=>D[i]);
+    const T=[[ed.c,ed.s,0,0,0,0],[-ed.s,ed.c,0,0,0,0],[0,0,1,0,0,0],
+             [0,0,0,ed.c,ed.s,0],[0,0,0,-ed.s,ed.c,0],[0,0,0,0,0,1]];
+    const dLocalRaw=matVec(T,dg);
+    let dLocal=backSubstitute(ed.kFull,ed.fFull,dLocalRaw,ed.condIdx);
+    if(ed.el.id===targetElId){
+      for(let i=0;i<6;i++) dLocal[i] -= dDislocation[i];
+    }
+    const Fend=matVec(ed.kFull,dLocal).map((v,i)=>v-ed.fFull[i]);
+    return {el:ed.el,L:ed.L,c:ed.c,s:ed.s,dLocal,Fend};
+  });
+
+  return {D,results,elemData,nodeIndex,singular};
+}
+
+/* =========================================================================
+   ENVELOPE SOLVER (MOVING UNIT DOWNWARD LOAD P)
+   Computes the max/min internal force & reaction envelopes as a vertical
+   concentrated load P traverses all members (or selected route) in 41 steps
+   per member, including span corrections between nodes.
+   ========================================================================= */
+function solveEnvelope(model, options){
+  options = options || {};
+  const loadP = (options.loadP != null) ? options.loadP : 1.0;
+  const trajectoryElemIds = options.trajectoryElemIds || null;
+  const NSAMP = 40;
+
+  const nodes = model.nodes;
+  const nodeIndex = {};
+  nodes.forEach((n, i) => nodeIndex[n.id] = i);
+  const nDof = 3 * nodes.length;
+
+  let K = zerosMat(nDof, nDof);
+
+  const elemData = model.elements.map(el => {
+    const n1 = nodes[nodeIndex[el.n1]], n2 = nodes[nodeIndex[el.n2]];
+    const dx = n2.x - n1.x, dy = n2.y - n1.y;
+    const L = Math.sqrt(dx * dx + dy * dy) || 1e-6;
+    const c = dx / L, s = dy / L;
+    const kFull = localStiffness(el.E, el.A, el.I, L);
+    const condIdx = [];
+    if(el.hingeStart) condIdx.push(2);
+    if(el.hingeEnd) condIdx.push(5);
+    const { k: kCond } = condense(kFull, zerosVec(6), condIdx);
+    const T = [[c,s,0,0,0,0],[-s,c,0,0,0,0],[0,0,1,0,0,0],[0,0,0,c,s,0],[0,0,0,-s,c,0],[0,0,0,0,0,1]];
+    const Tt = transpose(T);
+    const kGlobal = matMul(matMul(Tt, kCond), T);
+    const dofMap = [3*nodeIndex[el.n1]+0, 3*nodeIndex[el.n1]+1, 3*nodeIndex[el.n1]+2,
+                    3*nodeIndex[el.n2]+0, 3*nodeIndex[el.n2]+1, 3*nodeIndex[el.n2]+2];
+    return { el, n1, n2, L, c, s, kFull, condIdx, kCond, kGlobal, dofMap, T, Tt };
+  });
+
+  for(const ed of elemData){
+    for(let i = 0; i < 6; i++){
+      for(let j = 0; j < 6; j++) K[ed.dofMap[i]][ed.dofMap[j]] += ed.kGlobal[i][j];
+    }
+  }
+
+  const Lambda = zerosMat(nDof, nDof);
+  for(let i = 0; i < nDof; i++) Lambda[i][i] = 1;
+  const supportMap = {};
+  (model.supports || []).forEach(sp => { supportMap[sp.nodeId] = sp; });
+  nodes.forEach((n, i) => {
+    const sp = supportMap[n.id];
+    if(sp && sp.angleDeg){
+      const a = sp.angleDeg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+      const iu = 3 * i, iv = 3 * i + 1;
+      Lambda[iu][iu] = c; Lambda[iu][iv] = -s; Lambda[iv][iu] = s; Lambda[iv][iv] = c;
+    }
+  });
+  const LambdaT = transpose(Lambda);
+  let Kp = matMul(matMul(LambdaT, K), Lambda);
+
+  const isFixed = new Array(nDof).fill(false);
+  const springInfo = {};
+  nodes.forEach((n, i) => {
+    const sp = supportMap[n.id]; if(!sp) return;
+    const dirs = [{ c: sp.ux, dof: 3*i+0 }, { c: sp.uy, dof: 3*i+1 }, { c: sp.rz, dof: 3*i+2 }];
+    dirs.forEach(({ c, dof }) => {
+      if(!c || c.type === 'free') return;
+      if(c.type === 'fixed'){ isFixed[dof] = true; }
+      else if(c.type === 'spring'){ Kp[dof][dof] += c.k; springInfo[dof] = c.k; }
+    });
+  });
+
+  let maxDiag = 0;
+  for(let i = 0; i < nDof; i++) maxDiag = Math.max(maxDiag, Math.abs(Kp[i][i]));
+  const floatTol = Math.max(maxDiag, 1) * 1e-9;
+  for(let i = 0; i < nDof; i++){
+    if(!isFixed[i] && Math.abs(Kp[i][i]) < floatTol){ isFixed[i] = true; }
+  }
+
+  const freeIdx = [], fixedIdx = [];
+  for(let i = 0; i < nDof; i++){ if(isFixed[i]) fixedIdx.push(i); else freeIdx.push(i); }
+  const Kff = freeIdx.map(i => freeIdx.map(j => Kp[i][j]));
+  const KffInv = freeIdx.length > 0 ? invSmall(Kff) : [];
+
+  let singular = false;
+  if(freeIdx.length > 0){
+    const testSolve = solveLinSys(Kff, new Array(freeIdx.length).fill(1));
+    singular = testSolve.singular;
+  }
+
+  const envelopeData = {};
+  elemData.forEach(ed => {
+    const pts = [];
+    for(let k = 0; k <= NSAMP; k++){
+      const x = ed.L * k / NSAMP;
+      pts.push({
+        x,
+        M_max: -Infinity, M_min: Infinity,
+        V_max: -Infinity, V_min: Infinity,
+        N_max: -Infinity, N_min: Infinity,
+        sigTop_max: -Infinity, sigTop_min: Infinity,
+        sigBot_max: -Infinity, sigBot_min: Infinity
+      });
+    }
+    envelopeData[ed.el.id] = { pts, L: ed.L, c: ed.c, s: ed.s, n1: ed.n1 };
+  });
+
+  const reactionsEnvelope = {};
+  nodes.forEach(n => {
+    if(supportMap[n.id]){
+      reactionsEnvelope[n.id] = {
+        Rx_max: -Infinity, Rx_min: Infinity,
+        Ry_max: -Infinity, Ry_min: Infinity,
+        Rm_max: -Infinity, Rm_min: Infinity
+      };
+    }
+  });
+
+  const targetElements = trajectoryElemIds && trajectoryElemIds.length > 0
+    ? elemData.filter(ed => trajectoryElemIds.includes(ed.el.id))
+    : elemData;
+
+  targetElements.forEach(loadedEd => {
+    const L = loadedEd.L;
+    const c = loadedEd.c, s = loadedEd.s;
+    const Px = -s * loadP;
+    const Py = -c * loadP;
+
+    for(let step = 0; step <= NSAMP; step++){
+      const a = L * step / NSAMP;
+      const b = L - a;
+
+      const fFullLoaded = zerosVec(6);
+      fFullLoaded[0] = Px * (b / L);
+      fFullLoaded[3] = Px * (a / L);
+
+      const H1 = (b * b * (3 * a + b)) / (L * L * L);
+      const H2 = (a * b * b) / (L * L);
+      const H3 = (a * a * (a + 3 * b)) / (L * L * L);
+      const H4 = -(a * a * b) / (L * L);
+
+      fFullLoaded[1] = Py * H1;
+      fFullLoaded[2] = Py * H2;
+      fFullLoaded[4] = Py * H3;
+      fFullLoaded[5] = Py * H4;
+
+      const { f: fCondLoaded } = condense(loadedEd.kFull, fFullLoaded, loadedEd.condIdx);
+      const fGlobalLoaded = matVec(loadedEd.Tt, fCondLoaded);
+
+      const F = zerosVec(nDof);
+      for(let i = 0; i < 6; i++){
+        F[loadedEd.dofMap[i]] += fGlobalLoaded[i];
+      }
+
+      const Fp = matVec(LambdaT, F);
+      const Ff = freeIdx.map(i => Fp[i]);
+      const Uf = freeIdx.length > 0 ? matVec(KffInv, Ff) : [];
+
+      const Dp = zerosVec(nDof);
+      freeIdx.forEach((gi, i) => { Dp[gi] = Uf[i]; });
+
+      const Rp = matVec(Kp, Dp).map((v, i) => v - Fp[i]);
+      Object.keys(springInfo).forEach(dofStr => {
+        const dof = +dofStr; const k = springInfo[dof];
+        Rp[dof] = -k * Dp[dof];
+      });
+
+      const D = matVec(Lambda, Dp);
+      const Rglobal = matVec(Lambda, Rp);
+
+      nodes.forEach(n => {
+        if(supportMap[n.id] && reactionsEnvelope[n.id]){
+          const nidx = nodeIndex[n.id];
+          const rx = Rglobal[3 * nidx];
+          const ry = Rglobal[3 * nidx + 1];
+          const rm = Rglobal[3 * nidx + 2];
+          const renv = reactionsEnvelope[n.id];
+          if(rx > renv.Rx_max) renv.Rx_max = rx;
+          if(rx < renv.Rx_min) renv.Rx_min = rx;
+          if(ry > renv.Ry_max) renv.Ry_max = ry;
+          if(ry < renv.Ry_min) renv.Ry_min = ry;
+          if(rm > renv.Rm_max) renv.Rm_max = rm;
+          if(rm < renv.Rm_min) renv.Rm_min = rm;
+        }
+      });
+
+      elemData.forEach(ed => {
+        const isLoaded = (ed.el.id === loadedEd.el.id);
+        const fFullThis = isLoaded ? fFullLoaded : zerosVec(6);
+        const dg = ed.dofMap.map(i => D[i]);
+        const dLocalRaw = matVec(ed.T, dg);
+        const dLocal = backSubstitute(ed.kFull, fFullThis, dLocalRaw, ed.condIdx);
+        const Fend = matVec(ed.kFull, dLocal).map((v, i) => v - fFullThis[i]);
+
+        const N0 = -Fend[0], V0 = Fend[1];
+        let M0 = -Fend[2];
+        if(ed.el.hingeStart){
+          M0 = 0;
+        }
+
+        const elObj = ed.el;
+        const Astress = (elObj.A_real != null) ? elObj.A_real : elObj.A;
+        const cTop = (elObj.cTop != null) ? elObj.cTop : (elObj.h || 0) / 2;
+        const cBot = (elObj.cBot != null) ? elObj.cBot : (elObj.h || 0) / 2;
+        const Isec = elObj.I || 1e-6;
+
+        const envPts = envelopeData[ed.el.id].pts;
+
+        for(let k = 0; k <= NSAMP; k++){
+          const xk = ed.L * k / NSAMP;
+          const pt = envPts[k];
+
+          const updatePt = (Nx, Vx, Mx) => {
+            const sigTop = (Astress ? Nx / Astress : 0) - (Isec ? Mx * cTop / Isec : 0);
+            const sigBot = (Astress ? Nx / Astress : 0) + (Isec ? Mx * cBot / Isec : 0);
+            if(Mx > pt.M_max) pt.M_max = Mx;
+            if(Mx < pt.M_min) pt.M_min = Mx;
+            if(Vx > pt.V_max) pt.V_max = Vx;
+            if(Vx < pt.V_min) pt.V_min = Vx;
+            if(Nx > pt.N_max) pt.N_max = Nx;
+            if(Nx < pt.N_min) pt.N_min = Nx;
+            if(sigTop > pt.sigTop_max) pt.sigTop_max = sigTop;
+            if(sigTop < pt.sigTop_min) pt.sigTop_min = sigTop;
+            if(sigBot > pt.sigBot_max) pt.sigBot_max = sigBot;
+            if(sigBot < pt.sigBot_min) pt.sigBot_min = sigBot;
+          };
+
+          if(isLoaded && Math.abs(xk - a) < 1e-9){
+            updatePt(N0, V0, M0 + V0 * xk);
+            updatePt(N0 - Px, V0 + Py, M0 + V0 * xk);
+          } else {
+            let Nx = N0;
+            let Vx = V0;
+            let Mx = M0 + V0 * xk;
+            if(isLoaded && xk > a){
+              Nx += -Px;
+              Vx += Py;
+              Mx += Py * (xk - a);
+            }
+            updatePt(Nx, Vx, Mx);
+          }
+        }
+      });
+    }
+  });
+
+  Object.values(reactionsEnvelope).forEach(r => {
+    if(!isFinite(r.Rx_max)) { r.Rx_max = 0; r.Rx_min = 0; }
+    if(!isFinite(r.Ry_max)) { r.Ry_max = 0; r.Ry_min = 0; }
+    if(!isFinite(r.Rm_max)) { r.Rm_max = 0; r.Rm_min = 0; }
+  });
+
+  const extremes = {
+    M: { max: -Infinity, min: Infinity, magnitude: 0, maxAt: null, minAt: null },
+    T: { max: -Infinity, min: Infinity, magnitude: 0, maxAt: null, minAt: null },
+    N: { max: -Infinity, min: Infinity, magnitude: 0, maxAt: null, minAt: null },
+    S: { max: -Infinity, min: Infinity, magnitude: 0, maxAt: null, minAt: null }
+  };
+
+  Object.keys(envelopeData).forEach(elIdStr => {
+    const elId = +elIdStr;
+    const edEnv = envelopeData[elId];
+    edEnv.pts.forEach(pt => {
+      if(pt.M_max > extremes.M.max){ extremes.M.max = pt.M_max; extremes.M.maxAt = { elId, x: pt.x }; }
+      if(pt.M_min < extremes.M.min){ extremes.M.min = pt.M_min; extremes.M.minAt = { elId, x: pt.x }; }
+      extremes.M.magnitude = Math.max(extremes.M.magnitude, Math.abs(pt.M_max), Math.abs(pt.M_min));
+
+      if(pt.V_max > extremes.T.max){ extremes.T.max = pt.V_max; extremes.T.maxAt = { elId, x: pt.x }; }
+      if(pt.V_min < extremes.T.min){ extremes.T.min = pt.V_min; extremes.T.minAt = { elId, x: pt.x }; }
+      extremes.T.magnitude = Math.max(extremes.T.magnitude, Math.abs(pt.V_max), Math.abs(pt.V_min));
+
+      if(pt.N_max > extremes.N.max){ extremes.N.max = pt.N_max; extremes.N.maxAt = { elId, x: pt.x }; }
+      if(pt.N_min < extremes.N.min){ extremes.N.min = pt.N_min; extremes.N.minAt = { elId, x: pt.x }; }
+      extremes.N.magnitude = Math.max(extremes.N.magnitude, Math.abs(pt.N_max), Math.abs(pt.N_min));
+
+      const sMax = Math.max(pt.sigTop_max, pt.sigBot_max);
+      const sMin = Math.min(pt.sigTop_min, pt.sigBot_min);
+      if(sMax > extremes.S.max){ extremes.S.max = sMax; extremes.S.maxAt = { elId, x: pt.x }; }
+      if(sMin < extremes.S.min){ extremes.S.min = sMin; extremes.S.minAt = { elId, x: pt.x }; }
+      extremes.S.magnitude = Math.max(extremes.S.magnitude, Math.abs(sMax), Math.abs(sMin));
+    });
+  });
+
+  return {
+    type: 'envelope',
+    loadP,
+    envelopeData,
+    reactionsEnvelope,
+    extremes,
+    elemData,
+    nodeIndex,
+    singular
+  };
+}
+
+window.FEM = { solveModel, solveStability, solveModal, solveHarmonic, pointResults, solveInfluenceLine, solveEnvelope };
 })();
 
 function zerosMat(r,c){return Array.from({length:r},()=>new Array(c).fill(0));}
@@ -1821,8 +2268,10 @@ const MAX_HISTORY=100;
 
 let solved=null;             // raw solver output
 let diagrams=null;           // per-element sampled arrays for plotting
+let ilDiagrams=null;         // influence lines: {N:{elId:{pts,L,c,s,n1}}, T:{...}, M:{...}}
 let solveWarning=null;
 let showDeform=false, showM=false, showT=false, showN=false, showStress=false, showReactions=false;
+let envelopeReactionMode = 'range'; // 'max' | 'min' | 'range' | 'off'
 // remembers the user's last chosen result-view toggles across re-solves (invalidateResults
 // resets the live show* flags every edit, but we want "Oblicz" to restore whatever the
 // person had been looking at, not always snap back to the bare deformation view).
@@ -2007,7 +2456,7 @@ function toggleSolveOrBack(){
 }
 
 function invalidateResults(){
-  solved=null; diagrams=null; solveWarning=null;
+  solved=null; diagrams=null; ilDiagrams=null; solveWarning=null;
   showDeform=showM=showT=showN=showStress=showReactions=false;
   probe.elId=null;
   updateRunButton();
@@ -2084,6 +2533,14 @@ function runAnalysis(){
   }
   if(anType === 'harmonic'){
     runHarmonicAnalysis();
+    return;
+  }
+  if(anType === 'influence'){
+    runInfluenceAnalysis();
+    return;
+  }
+  if(anType === 'envelope'){
+    runEnvelopeAnalysis();
     return;
   }
   runLinearStaticAnalysis();
@@ -2466,6 +2923,146 @@ function runHarmonicAnalysis(){
   render();
   updateRunButton();
   setStatusHint(`Obliczono drgania wymuszone (f = ${fmtSmart(freqHz, 3)} Hz, ω = ${fmtSmart(out.omega, 2)} rad/s).`);
+}
+
+function runInfluenceAnalysis(){
+  if(nodes.length<2 || elements.length<1){
+    solveWarning='Dodaj co najmniej dwa węzły i jeden pręt, aby uruchomić obliczenia.';
+    solved=null; diagrams=null; ilDiagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+  const hasAnySupport = nodes.some(n=>n.support && (
+    (n.support.ux&&n.support.ux.type!=='free') || (n.support.uy&&n.support.uy.type!=='free') || (n.support.rz&&n.support.rz.type!=='free')));
+  if(!hasAnySupport){
+    solveWarning='Model nie ma zdefiniowanych podpór — układ jest niestabilny.';
+    solved=null; diagrams=null; ilDiagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+  const params = (analysisSettings && analysisSettings.params) || {};
+  const ilElId = ilResolveElement(params);
+  const ilEnd = ilResolveEnd(params);
+  if(ilElId==null){
+    solveWarning='Wybierz pręt, dla którego ma zostać wyznaczona linia wpływu.';
+    solved=null; diagrams=null; ilDiagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  const model = buildSolverModel();
+  const byType={}, extremes={};
+  let anySingular=false;
+  try{
+    ['N','T','M'].forEach(type=>{
+      const out = FEM.solveInfluenceLine(model, ilElId, ilEnd, type);
+      byType[type]=out;
+      anySingular = anySingular || out.singular;
+    });
+  } catch(e){
+    solveWarning='Błąd obliczeń linii wpływu: '+e.message;
+    solved=null; diagrams=null; ilDiagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  ilDiagrams = {N:{}, T:{}, M:{}};
+  const NSAMP=40;
+  const bbox = modelBBox();
+  const diag = Math.hypot(bbox.maxX-bbox.minX, bbox.maxY-bbox.minY) || 10;
+  ['N','T','M'].forEach(type=>{
+    const out=byType[type];
+    let maxAbs=0, maxV=-Infinity, maxAt=null, minV=Infinity, minAt=null;
+    out.results.forEach((edRes,idx)=>{
+      const elId=elements[idx].id;
+      const pts=[];
+      for(let i=0;i<=NSAMP;i++){
+        const x=edRes.L*i/NSAMP;
+        const pr=FEM.pointResults(edRes,x);
+        pts.push(pr);
+        const v=pr.v_local;
+        maxAbs=Math.max(maxAbs,Math.abs(v));
+        if(v>maxV){ maxV=v; maxAt={elId,x}; }
+        if(v<minV){ minV=v; minAt={elId,x}; }
+      }
+      ilDiagrams[type][elId]={pts, L:edRes.L, c:edRes.c, s:edRes.s, n1:getNode(elements[idx].n1)};
+    });
+    extremes[type]={max:maxV,maxAt,min:minV,minAt,magnitude:maxAbs};
+  });
+
+  autoDiagN = extremes.N.magnitude>1e-9 ? (0.14*diag)/extremes.N.magnitude : 1;
+  autoDiagT = extremes.T.magnitude>1e-9 ? (0.14*diag)/extremes.T.magnitude : 1;
+  autoDiagM = extremes.M.magnitude>1e-9 ? (0.14*diag)/extremes.M.magnitude : 1;
+  magN=extremes.N.magnitude; magT=extremes.T.magnitude; magM=extremes.M.magnitude;
+
+  solved = {type:'influence', ilElementId:ilElId, ilEnd, byType, extremes, singular:anySingular,
+            elemData:byType.M.elemData, nodeIndex:byType.M.nodeIndex};
+  solveWarning = anySingular ? 'Układ może być geometrycznie niestabilny lub niedostatecznie podparty — wyniki mogą być błędne.' : null;
+  diagrams=null;
+  deformMult=1; diagMult=1;
+  showDeform=false; showReactions=false; showStress=false;
+  showM=true; showN=false; showT=false;
+  probe.elId = ilElId;
+  probe.t = ilEnd==='end' ? 1 : 0;
+
+  renderSidebar();
+  render();
+  updateRunButton();
+  const elLbl = `P${ilElId}`;
+  setStatusHint(`Obliczono linię wpływu dla przekroju ${elLbl} (${ilEnd==='start'?'węzeł początkowy':'węzeł końcowy'}).`);
+}
+
+function runEnvelopeAnalysis(){
+  if(nodes.length<2 || elements.length<1){
+    solveWarning='Dodaj co najmniej dwa węzły i jeden pręt, aby uruchomić obliczenia.';
+    solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+  const hasAnySupport = nodes.some(n=>n.support && (
+    (n.support.ux&&n.support.ux.type!=='free') || (n.support.uy&&n.support.uy.type!=='free') || (n.support.rz&&n.support.rz.type!=='free')));
+  if(!hasAnySupport){
+    solveWarning='Model nie ma zdefiniowanych podpór — układ jest niestabilny.';
+    solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+  const params = (analysisSettings && analysisSettings.params) || {};
+  const loadP = (params.envelopeP != null) ? params.envelopeP : 1.0;
+  const route = params.envelopeRoute || 'all';
+  const trajectoryElemIds = (route === 'selected' && selection.elemIds.length > 0)
+    ? selection.elemIds
+    : null;
+
+  const model = buildSolverModel();
+  let out;
+  try {
+    out = FEM.solveEnvelope(model, { loadP, trajectoryElemIds });
+  } catch(e){
+    solveWarning = 'Błąd obliczeń obwiedni: ' + e.message;
+    solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  solved = out;
+  solveWarning = out.singular ? 'Układ może być geometrycznie niestabilny lub niedostatecznie podparty — wyniki mogą być błędne.' : null;
+
+  const bbox = modelBBox();
+  const diag = Math.hypot(bbox.maxX - bbox.minX, bbox.maxY - bbox.minY) || 10;
+  autoDiagM = out.extremes.M.magnitude > 1e-9 ? (0.14 * diag) / out.extremes.M.magnitude : 1;
+  autoDiagT = out.extremes.T.magnitude > 1e-9 ? (0.14 * diag) / out.extremes.T.magnitude : 1;
+  autoDiagN = out.extremes.N.magnitude > 1e-9 ? (0.14 * diag) / out.extremes.N.magnitude : 1;
+  autoDiagS = out.extremes.S.magnitude > 1e-9 ? (0.14 * diag) / out.extremes.S.magnitude : 1;
+
+  magM = out.extremes.M.magnitude;
+  magT = out.extremes.T.magnitude;
+  magN = out.extremes.N.magnitude;
+  magS = out.extremes.S.magnitude;
+
+  let maxR = 0;
+  Object.values(out.reactionsEnvelope).forEach(r => {
+    maxR = Math.max(maxR, Math.abs(r.Rx_max), Math.abs(r.Rx_min), Math.abs(r.Ry_max), Math.abs(r.Ry_min), Math.abs(r.Rm_max), Math.abs(r.Rm_min));
+  });
+  magReaction = maxR;
+
+  diagrams = null;
+  ilDiagrams = null;
+  deformMult = 1; diagMult = 1;
+  showDeform = false; showReactions = true; showStress = false;
+  showM = true; showT = false; showN = false;
+  if(elements.length && probe.elId == null) probe.elId = elements[0].id;
+
+  renderSidebar();
+  render();
+  updateRunButton();
+  setStatusHint(`Obliczono obwiednię sił wewnętrznych dla ruchomej siły pionowej P = ${fmtSmart(loadP)} kN.`);
 }
 
 /* =========================================================================
@@ -3156,12 +3753,294 @@ function drawDiagramType(type){
   });
 }
 
+/* ---- influence-line diagrams (see FEM.solveInfluenceLine) ---- */
+function ilDg(elId){
+  if(!ilDiagrams) return null;
+  return ilDiagrams.M[elId] || ilDiagrams.T[elId] || ilDiagrams.N[elId] || null;
+}
+function drawInfluenceLineType(type){
+  if(!ilDiagrams || !ilDiagrams[type]) return;
+  const color = diagramColor(type);
+  const scale = type==='N'? autoDiagN*diagMult : type==='T'? autoDiagT*diagMult : autoDiagM*diagMult;
+  ctx.font='10px '+FONT_MONO;
+  elements.forEach(el=>{
+    const dg=ilDiagrams[type][el.id]; if(!dg) return;
+    const nx=-dg.s, ny=dg.c;
+    let baseline=[], offsetLine=[];
+    dg.pts.forEach(pr=>{
+      const base=elemBasePoint(dg.n1,dg.c,dg.s,pr.x);
+      const val=pr.v_local;
+      const ox=base.x+nx*val*scale, oy=base.y+ny*val*scale;
+      baseline.push(toScreen(base.x,base.y));
+      offsetLine.push(toScreen(ox,oy));
+    });
+    ctx.beginPath();
+    baseline.forEach((p,i)=> i? ctx.lineTo(p.x,p.y): ctx.moveTo(p.x,p.y));
+    for(let i=offsetLine.length-1;i>=0;i--) ctx.lineTo(offsetLine[i].x, offsetLine[i].y);
+    ctx.closePath();
+    ctx.fillStyle=color+'2e'; ctx.fill();
+    ctx.strokeStyle=color; ctx.lineWidth=1.6;
+    ctx.beginPath(); offsetLine.forEach((p,i)=> i? ctx.lineTo(p.x,p.y): ctx.moveTo(p.x,p.y)); ctx.stroke();
+    ctx.fillStyle=color; ctx.textAlign='center';
+    const v0=dg.pts[0].v_local, vE=dg.pts[dg.pts.length-1].v_local;
+    const mag = type==='N'?magN:type==='T'?magT:magM;
+    if(!isNegligible(v0,mag)) ctx.fillText(fmtSmart(v0), offsetLine[0].x, offsetLine[0].y + (offsetLine[0].y<baseline[0].y? -4:12));
+    if(!isNegligible(vE,mag)) ctx.fillText(fmtSmart(vE), offsetLine[offsetLine.length-1].x, offsetLine[offsetLine.length-1].y + (offsetLine[offsetLine.length-1].y<baseline[baseline.length-1].y? -4:12));
+  });
+}
+
+/* ---- envelope diagrams ---- */
+function drawEnvelopeDiagram(type){
+  if(!solved || solved.type !== 'envelope' || !solved.envelopeData) return;
+  const color = diagramColor(type);
+  const scale = type==='N'? autoDiagN*diagMult : type==='T'? autoDiagT*diagMult : type==='M'? autoDiagM*diagMult : autoDiagS*diagMult;
+  ctx.font = '10px ' + FONT_MONO;
+
+  elements.forEach(el => {
+    const env = solved.envelopeData[el.id];
+    if(!env) return;
+    const nx = -env.s, ny = env.c;
+    const n1 = getNode(el.n1);
+    let baseline = [], offsetLineMax = [], offsetLineMin = [];
+
+    env.pts.forEach(pt => {
+      const base = elemBasePoint(n1, env.c, env.s, pt.x);
+      let vMax, vMin;
+      if(type === 'M'){
+        vMax = -pt.M_max;
+        vMin = -pt.M_min;
+      } else if(type === 'T'){
+        vMax = pt.V_max;
+        vMin = pt.V_min;
+      } else if(type === 'N'){
+        vMax = pt.N_max;
+        vMin = pt.N_min;
+      } else {
+        vMax = Math.max(pt.sigTop_max, pt.sigBot_max);
+        vMin = Math.min(pt.sigTop_min, pt.sigBot_min);
+      }
+
+      const pBase = toScreen(base.x, base.y);
+      const pMax = toScreen(base.x + nx * vMax * scale, base.y + ny * vMax * scale);
+      const pMin = toScreen(base.x + nx * vMin * scale, base.y + ny * vMin * scale);
+
+      baseline.push(pBase);
+      offsetLineMax.push(pMax);
+      offsetLineMin.push(pMin);
+    });
+
+    ctx.beginPath();
+    offsetLineMax.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    for(let i = offsetLineMin.length - 1; i >= 0; i--){
+      ctx.lineTo(offsetLineMin[i].x, offsetLineMin[i].y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = color + '30';
+    ctx.fill();
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    offsetLineMax.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.stroke();
+
+    ctx.beginPath();
+    offsetLineMin.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.stroke();
+
+    ctx.save();
+    ctx.strokeStyle = color + '66';
+    ctx.lineWidth = 1.0;
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    baseline.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    const mag = type==='N'? magN : type==='T'? magT : type==='M'? magM : magS;
+
+    const pt0 = env.pts[0];
+    const ptE = env.pts[env.pts.length - 1];
+    let val0Max = type==='M'? pt0.M_max : type==='T'? pt0.V_max : type==='N'? pt0.N_max : Math.max(pt0.sigTop_max, pt0.sigBot_max);
+    let val0Min = type==='M'? pt0.M_min : type==='T'? pt0.V_min : type==='N'? pt0.N_min : Math.min(pt0.sigTop_min, pt0.sigBot_min);
+    let valEMax = type==='M'? ptE.M_max : type==='T'? ptE.V_max : type==='N'? ptE.N_max : Math.max(ptE.sigTop_max, ptE.sigBot_max);
+    let valEMin = type==='M'? ptE.M_min : type==='T'? ptE.V_min : type==='N'? ptE.N_min : Math.min(ptE.sigTop_min, ptE.sigBot_min);
+
+    const drawLabel = (text, x, y) => {
+      const w = ctx.measureText(text).width;
+      ctx.fillStyle = getCss('--badge-bg');
+      ctx.fillRect(x - w/2 - 2, y - 5, w + 4, 11);
+      ctx.fillStyle = color;
+      ctx.fillText(text, x, y + 4);
+    };
+
+    if(!isNegligible(val0Max, mag)) drawLabel(fmtSmart(val0Max), offsetLineMax[0].x, offsetLineMax[0].y - 6);
+    if(!isNegligible(val0Min, mag) && Math.abs(val0Max - val0Min) > 1e-4) drawLabel(fmtSmart(val0Min), offsetLineMin[0].x, offsetLineMin[0].y + 8);
+
+    if(!isNegligible(valEMax, mag)) drawLabel(fmtSmart(valEMax), offsetLineMax[offsetLineMax.length-1].x, offsetLineMax[offsetLineMax.length-1].y - 6);
+    if(!isNegligible(valEMin, mag) && Math.abs(valEMax - valEMin) > 1e-4) drawLabel(fmtSmart(valEMin), offsetLineMin[offsetLineMin.length-1].x, offsetLineMin[offsetLineMin.length-1].y + 8);
+
+    let peakIdx = -1, peakDiff = 0;
+    for(let k = 1; k < env.pts.length - 1; k++){
+      const ptk = env.pts[k];
+      const vK = type==='M'? ptk.M_max : type==='T'? ptk.V_max : type==='N'? ptk.N_max : Math.max(ptk.sigTop_max, ptk.sigBot_max);
+      if(vK > val0Max && vK > valEMax && (vK - Math.max(val0Max, valEMax)) > peakDiff){
+        peakDiff = vK - Math.max(val0Max, valEMax);
+        peakIdx = k;
+      }
+    }
+    if(peakIdx > 0 && !isNegligible(peakDiff, mag)){
+      const ptPeak = env.pts[peakIdx];
+      const vPeak = type==='M'? ptPeak.M_max : type==='T'? ptPeak.V_max : type==='N'? ptPeak.N_max : Math.max(ptPeak.sigTop_max, ptPeak.sigBot_max);
+      drawLabel(fmtSmart(vPeak), offsetLineMax[peakIdx].x, offsetLineMax[peakIdx].y - 6);
+    }
+  });
+}
+
+function setEnvelopeReactionMode(mode){
+  envelopeReactionMode = mode;
+  showReactions = (mode !== 'off');
+  renderSidebar();
+  render();
+}
+
+function drawEnvelopeReactions(){
+  if(!solved || !solved.reactionsEnvelope || envelopeReactionMode === 'off' || !showReactions) return;
+  ctx.font='10.5px '+FONT_MONO;
+  const RC=getCss('--react-color');
+  const gap=26, len=32;
+  nodes.forEach(n=>{
+    const renv = solved.reactionsEnvelope[n.id];
+    if(!renv || !n.support) return;
+    const p = toScreen(n.x, n.y);
+    const angDeg = n.support.angleDeg || 0, angRad = angDeg * Math.PI / 180;
+    const c = Math.cos(angRad), s = Math.sin(angRad);
+
+    if(envelopeReactionMode === 'range'){
+      const hasRy = (Math.abs(renv.Ry_max) > 1e-6 || Math.abs(renv.Ry_min) > 1e-6);
+      const hasRx = (Math.abs(renv.Rx_max) > 1e-6 || Math.abs(renv.Rx_min) > 1e-6);
+      const hasRm = (Math.abs(renv.Rm_max) > 1e-6 || Math.abs(renv.Rm_min) > 1e-6);
+
+      if(hasRy){
+        const rdx = -s, rdy = -c;
+        const px = -rdx, py = -rdy;
+        const head = { x: p.x + px * gap, y: p.y + py * gap };
+        const tail = { x: p.x + px * (gap + len), y: p.y + py * (gap + len) };
+        drawArrow(tail.x, tail.y, head.x, head.y, RC);
+        const text = `Ry: [${fmtSmart(renv.Ry_min)} .. ${fmtSmart(renv.Ry_max)}] kN`;
+        const w = ctx.measureText(text).width;
+        ctx.fillStyle = getCss('--badge-bg');
+        ctx.fillRect(tail.x + 4, tail.y - 6, w + 4, 12);
+        ctx.fillStyle = RC; ctx.textAlign = 'left';
+        ctx.fillText(text, tail.x + 6, tail.y + 3);
+      }
+      if(hasRx){
+        const rdx = c, rdy = -s;
+        const px = -rdx, py = -rdy;
+        const head = { x: p.x + px * gap, y: p.y + py * gap };
+        const tail = { x: p.x + px * (gap + len), y: p.y + py * (gap + len) };
+        drawArrow(tail.x, tail.y, head.x, head.y, RC);
+        const text = `Rx: [${fmtSmart(renv.Rx_min)} .. ${fmtSmart(renv.Rx_max)}] kN`;
+        const w = ctx.measureText(text).width;
+        ctx.fillStyle = getCss('--badge-bg');
+        ctx.fillRect(tail.x - w - 6, tail.y - 6, w + 4, 12);
+        ctx.fillStyle = RC; ctx.textAlign = 'right';
+        ctx.fillText(text, tail.x - 4, tail.y + 3);
+      }
+      if(hasRm){
+        const text = `M: [${fmtSmart(renv.Rm_min)} .. ${fmtSmart(renv.Rm_max)}] kNm`;
+        drawMomentArc(p.x, p.y, renv.Rm_max, 22, RC, text, angDeg);
+      }
+    } else {
+      const isMax = (envelopeReactionMode === 'max');
+      const Rx = isMax ? renv.Rx_max : renv.Rx_min;
+      const Ry = isMax ? renv.Ry_max : renv.Ry_min;
+      const Rm = isMax ? renv.Rm_max : renv.Rm_min;
+      const suffix = isMax ? 'max' : 'min';
+
+      const Rlx = c * Rx + s * Ry;
+      const Rly = -s * Rx + c * Ry;
+
+      if(!isNegligible(Rlx, magReaction)){
+        const sign = Rlx >= 0 ? 1 : -1;
+        const rdx = sign * c, rdy = -sign * s;
+        const px = -rdx, py = -rdy;
+        const head = { x: p.x + px * gap, y: p.y + py * gap };
+        const tail = { x: p.x + px * (gap + len), y: p.y + py * (gap + len) };
+        drawArrow(tail.x, tail.y, head.x, head.y, RC);
+        ctx.fillStyle = RC; ctx.textAlign = px < -0.2 ? 'right' : 'left';
+        ctx.fillText(`Rx_${suffix} = ${fmtSmart(Rlx)} kN`, tail.x + px * 8, tail.y + py * 8 + 3);
+      }
+      if(!isNegligible(Rly, magReaction)){
+        const sign = Rly >= 0 ? 1 : -1;
+        const rdx = -sign * s, rdy = -sign * c;
+        const px = -rdx, py = -rdy;
+        const head = { x: p.x + px * gap, y: p.y + py * gap };
+        const tail = { x: p.x + px * (gap + len), y: p.y + py * (gap + len) };
+        drawArrow(tail.x, tail.y, head.x, head.y, RC);
+        ctx.fillStyle = RC; ctx.textAlign = px < -0.2 ? 'right' : 'left';
+        ctx.fillText(`Ry_${suffix} = ${fmtSmart(Rly)} kN`, tail.x + px * 8, tail.y + py * 8 + 3);
+      }
+      if(!isNegligible(Rm, magReaction)){
+        drawMomentArc(p.x, p.y, Rm, 22, RC, `M_${suffix} = ${fmtSmart(Rm)} kNm`, angDeg);
+      }
+    }
+  });
+}
+function drawILSectionMarker(){
+  let targetElId, targetEnd;
+  if(solved && solved.type==='influence'){
+    targetElId = solved.ilElementId;
+    targetEnd = solved.ilEnd;
+  } else if(analysisSettings && analysisSettings.type==='influence'){
+    const params = analysisSettings.params || {};
+    targetElId = ilResolveElement(params);
+    targetEnd = ilResolveEnd(params);
+  } else {
+    return;
+  }
+
+  if(targetElId == null) return;
+  const el = getElement(targetElId);
+  if(!el) return;
+  const a = getNode(el.n1), b = getNode(el.n2);
+  if(!a || !b) return;
+
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const L = Math.hypot(dx, dy) || 1e-6;
+  const c = dx / L, s = dy / L;
+  const x = (targetEnd === 'end') ? L : 0;
+
+  const base = elemBasePoint(a, c, s, x);
+  const p = toScreen(base.x, base.y);
+  const nx = -s, ny = c;
+  const p1 = toScreen(base.x + nx * 0.35, base.y + ny * 0.35);
+  const p2 = toScreen(base.x - nx * 0.35, base.y - ny * 0.35);
+
+  ctx.save();
+  ctx.strokeStyle = getCss('--accent'); ctx.lineWidth = 2.4; ctx.setLineDash([5, 3]);
+  ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, 7);
+  ctx.fillStyle = getCss('--accent'); ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+  ctx.restore();
+}
+
 /* ---- probe marker ---- */
 function drawProbeMarker(){
-  if(!diagrams || probe.elId==null) return;
-  const dg=diagrams[probe.elId]; if(!dg) return;
+  if(probe.elId==null) return;
+  const isEnv = solved && solved.type==='envelope';
+  const isInf = solved && solved.type==='influence';
+  const dg = isEnv ? (solved.envelopeData && solved.envelopeData[probe.elId]) : (isInf ? ilDg(probe.elId) : (diagrams? diagrams[probe.elId] : null));
+  if(!dg) return;
+  const el = getElement(probe.elId);
+  if(!el) return;
+  const n1 = getNode(el.n1);
+  if(!n1) return;
   const x = probe.t*dg.L;
-  const base = elemBasePoint(dg.n1,dg.c,dg.s,x);
+  const base = elemBasePoint(n1, dg.c, dg.s, x);
   const p=toScreen(base.x,base.y);
   ctx.beginPath(); ctx.arc(p.x,p.y,6,0,7);
   ctx.fillStyle='#0f172a'; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle='#fff'; ctx.stroke();
@@ -3176,6 +4055,10 @@ function roundRect(x,y,w,h,r){
 }
 function drawReactions(){
   if(!solved) return;
+  if(solved.type === 'envelope'){
+    drawEnvelopeReactions();
+    return;
+  }
   ctx.font='10.5px '+FONT_MONO;
   const RC=getCss('--react-color');
   const gap=26, len=32; // gap clears the support symbol; arrow tail sits gap+len away
@@ -3185,18 +4068,14 @@ function drawReactions(){
     const Rx=solved.Rglobal[3*idx], Ry=solved.Rglobal[3*idx+1], Rm=solved.Rglobal[3*idx+2];
     if(isNegligible(Rx,magReaction) && isNegligible(Ry,magReaction) && isNegligible(Rm,magReaction)) return;
     const p=toScreen(n.x,n.y);
-    // rotate the global reaction into the support's own local frame (same convention
-    // the solver uses) so a rotated support with e.g. only one restrained direction
-    // shows exactly one arrow along that direction, with the free direction at 0 —
-    // not the raw, possibly-nonzero-looking global Rx/Ry components.
     const angDeg=n.support.angleDeg||0, angRad=angDeg*Math.PI/180;
     const c=Math.cos(angRad), s=Math.sin(angRad);
     const Rlx = c*Rx + s*Ry;
     const Rly = -s*Rx + c*Ry;
     if(!isNegligible(Rlx,magReaction)){
       const sign=Rlx>=0?1:-1;
-      const rdx=sign*c, rdy=-sign*s; // direction the reaction physically acts (screen space)
-      const px=-rdx, py=-rdy; // arrow sits on that side, pointing INTO the node
+      const rdx=sign*c, rdy=-sign*s;
+      const px=-rdx, py=-rdy;
       const head={x:p.x+px*gap, y:p.y+py*gap};
       const tail={x:p.x+px*(gap+len), y:p.y+py*(gap+len)};
       drawArrow(tail.x,tail.y,head.x,head.y,RC);
@@ -3205,7 +4084,7 @@ function drawReactions(){
     }
     if(!isNegligible(Rly,magReaction)){
       const sign=Rly>=0?1:-1;
-      const rdx=-sign*s, rdy=-sign*c; // direction the reaction physically acts (screen space)
+      const rdx=-sign*s, rdy=-sign*c;
       const px=-rdx, py=-rdy;
       const head={x:p.x+px*gap, y:p.y+py*gap};
       const tail={x:p.x+px*(gap+len), y:p.y+py*(gap+len)};
@@ -3247,20 +4126,34 @@ function render(){
   ctx.clearRect(0,0,rect.width,rect.height);
   ctx.fillStyle=getCss('--bg-canvas'); ctx.fillRect(0,0,rect.width,rect.height);
   if(showBackgroundGrid) drawGrid();
+  const isInfluence = solved && solved.type==='influence';
+  const isEnvelope = solved && solved.type==='envelope';
   const showingResults = showDeform||showM||showT||showN||showStress||showReactions;
   const hideLS = hideLoadsSupportsInResults && showingResults;
-  if(showDeform) drawDeformedShape();
+  if(showDeform && !isInfluence && !isEnvelope) drawDeformedShape();
   drawElements();
-  if(showN) drawDiagramType('N');
-  if(showT) drawDiagramType('T');
-  if(showM) drawDiagramType('M');
-  if(showStress) drawDiagramType('S');
+  if(isInfluence){
+    if(showN) drawInfluenceLineType('N');
+    if(showT) drawInfluenceLineType('T');
+    if(showM) drawInfluenceLineType('M');
+  } else if(isEnvelope){
+    if(showN) drawEnvelopeDiagram('N');
+    if(showT) drawEnvelopeDiagram('T');
+    if(showM) drawEnvelopeDiagram('M');
+    if(showStress) drawEnvelopeDiagram('S');
+  } else {
+    if(showN) drawDiagramType('N');
+    if(showT) drawDiagramType('T');
+    if(showM) drawDiagramType('M');
+    if(showStress) drawDiagramType('S');
+  }
   if(!hideLS) drawSupports();
-  if(!hideLS) drawLoads();
+  if(!hideLS && !isEnvelope) drawLoads();
   drawNodes();
   if(showIdLabels) drawIdLabels();
-  if(showReactions) drawReactions();
-  if(probe.elId!=null && diagrams) drawProbeMarker();
+  if(showReactions && !isInfluence) drawReactions();
+  drawILSectionMarker();
+  if(probe.elId!=null && (diagrams || (isInfluence && ilDiagrams) || (isEnvelope && solved && solved.envelopeData))) drawProbeMarker();
   drawTransientOverlays();
   drawScaleBar();
   drawSelectionBox();
@@ -3815,7 +4708,8 @@ function handlePointerDown(px,py){
     const eid=hitTestElement(px,py);
     if(eid!=null){
       selection={nodeIds:[],elemIds:[eid]};
-      if(diagrams && diagrams[eid]!=null){ probe.elId=eid; probe.t=projectOnElement(eid,px,py); }
+      probe.elId=eid;
+      probe.t=projectOnElement(eid,px,py);
       renderSidebar(); render(); return;
     }
     if(boxSelectEnabled){
@@ -4159,6 +5053,8 @@ function panelAnalysisType(){
             <option value="stability" ${type==='stability'?'selected':''}>Stateczność (wyboczenie)</option>
             <option value="modal" ${type==='modal'?'selected':''}>Drgania własne (modalna)</option>
             <option value="harmonic" ${type==='harmonic'?'selected':''}>Drgania wymuszone (harmoniczne)</option>
+            <option value="influence" ${type==='influence'?'selected':''}>Linie wpływu (siły przekrojowe)</option>
+            <option value="envelope" ${type==='envelope'?'selected':''}>Obwiednia sił (obciążenie ruchome)</option>
           </select>
         </div>
         ${type==='linear_static' ? `
@@ -4200,9 +5096,62 @@ function panelAnalysisType(){
             Drgania harmoniczne bez tłumienia: obciążenia z modelu stanowią amplitudę wymuszenia F(t) = F₀ · sin(2πf · t). Analiza wyznacza rzeczywiste amplitudy przemieszczeń, sił wewnętrznych i naprężeń.
           </div>
         ` : ''}
+        ${type==='influence' ? panelInfluenceSetupHtml(params) : ''}
+        ${type==='envelope' ? panelEnvelopeSetupHtml(params) : ''}
       </div>
     </div>
   </div>`;
+}
+
+function panelEnvelopeSetupHtml(params){
+  return `
+    <div class="row" style="margin-top:8px;">
+      <label style="min-width:110px;">Wartość siły P</label>
+      <input type="number" min="0.001" step="0.5" value="${params.envelopeP!=null?params.envelopeP:1.0}" onchange="updateAnalysisParam('envelopeP', Math.max(0.001, parseFloat(this.value)||1.0))" style="max-width:80px;">
+      <span class="unit">kN ↓</span>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <label style="min-width:110px;">Trasa przejazdu</label>
+      <select onchange="updateAnalysisParam('envelopeRoute', this.value)">
+        <option value="all" ${(params.envelopeRoute!=='selected')?'selected':''}>Wszystkie pręty modelu</option>
+        <option value="selected" ${params.envelopeRoute==='selected'?'selected':''}>Tylko zaznaczone pręty (${selection.elemIds.length})</option>
+      </select>
+    </div>
+    <div class="muted" style="margin-top:6px;line-height:1.4;">
+      Obwiednia sił (Envelope): pionowa siła jednostkowa P przejeżdża krok po kroku po prętach (41 kroków na pręt). Program wyznacza ekstremalne wartości (maksymalne i minimalne) dla momentów M, sił poprzecznych T, osiowych N, naprężeń oraz reakcji podporowych.
+    </div>
+  `;
+}
+
+function ilResolveElement(params){
+  return (params.ilElementId!=null && getElement(params.ilElementId)) ? params.ilElementId : (elements[0] && elements[0].id);
+}
+function ilResolveEnd(params){ return params.ilEnd==='end' ? 'end' : 'start'; }
+
+function panelInfluenceSetupHtml(params){
+  if(elements.length===0){
+    return `<div class="muted" style="margin-top:6px;">Dodaj co najmniej jeden pręt, aby wyznaczyć linię wpływu.</div>`;
+  }
+  const elId = ilResolveElement(params);
+  const end = ilResolveEnd(params);
+  const el = getElement(elId);
+  const options = elements.map(e=>`<option value="${e.id}" ${e.id===elId?'selected':''}>P${e.id} (W${e.n1}→W${e.n2})</option>`).join('');
+  return `
+    <div class="row" style="margin-top:8px;">
+      <label style="min-width:110px;">Pręt</label>
+      <select onchange="updateAnalysisParam('ilElementId', parseInt(this.value))">${options}</select>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <label style="min-width:110px;">Przekrój</label>
+      <select onchange="updateAnalysisParam('ilEnd', this.value)">
+        <option value="start" ${end==='start'?'selected':''}>węzeł początkowy (W${el.n1})</option>
+        <option value="end" ${end==='end'?'selected':''}>węzeł końcowy (W${el.n2})</option>
+      </select>
+    </div>
+    <div class="muted" style="margin-top:6px;line-height:1.4;">
+      Metoda kinematyczna (zasada Müllera-Breslaua): przekrojowi nadawana jest jednostkowa dyslokacja odpowiadająca szukanej sile (N, T lub M), a otrzymana linia ugięcia całej konstrukcji jest bezpośrednio linią wpływu tej siły — dla jednostkowego obciążenia poprzecznego, przemieszczającego się po konstrukcji. Działa również dla układów statycznie niewyznaczalnych (jedno dodatkowe rozwiązanie układu, bez przesuwania obciążenia krok po kroku).
+    </div>
+  `;
 }
 
 /* =========================================================================
@@ -4956,6 +5905,12 @@ function panelResults(){
   if(solved.type === 'harmonic'){
     return panelHarmonicResults();
   }
+  if(solved.type === 'influence'){
+    return panelInfluenceResults();
+  }
+  if(solved.type === 'envelope'){
+    return panelEnvelopeResults();
+  }
   let html = `<div class="panel"><h3>Reakcje <span class="tag">rozwiązano</span></h3>`;
   if(solveWarning) html += `<div class="warn">${solveWarning}</div>`;
   html += reactionsTableHtml();
@@ -4963,6 +5918,81 @@ function panelResults(){
   html += diagramTogglesHtml();
   html += probePanelHtml();
   return html;
+}
+
+function panelEnvelopeResults(){
+  const ext = solved.extremes;
+  function extCard(label, unit, colorVar, minV, maxV, minAt, maxAt){
+    const posLabel = (pos) => pos ? `P${pos.elId}, x = ${fmt(pos.x,2)} m` : '—';
+    return `<div class="card" style="margin-top:6px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <span style="font-weight:600;font-size:12px;"><span class="swatch" style="background:var(${colorVar});display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;"></span>${label}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;">
+        <span style="color:var(--text-dim);font-size:11px;">Maksimum:</span>
+        <span style="font-family:var(--mono);font-size:12px;font-weight:600;">${fmtSmart(maxV)} ${unit} &nbsp;(${posLabel(maxAt)})</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:2px;">
+        <span style="color:var(--text-dim);font-size:11px;">Minimum:</span>
+        <span style="font-family:var(--mono);font-size:12px;font-weight:600;">${fmtSmart(minV)} ${unit} &nbsp;(${posLabel(minAt)})</span>
+      </div>
+    </div>`;
+  }
+
+  let html = `<div class="panel">
+    <h3>Obwiednia sił <span class="tag">Ruchoma siła</span></h3>
+    ${solveWarning ? `<div class="warn">${solveWarning}</div>` : ''}
+    <div class="muted" style="line-height:1.4;">
+      Obciążenie ruchome: siła pionowa <b>P = ${fmtSmart(solved.loadP)} kN ↓</b>, ${solved.totalSteps} położeń na prętach.
+    </div>
+    ${extCard('Moment zginający M', 'kNm', '--m-color', ext.M.min, ext.M.max, ext.M.minAt, ext.M.maxAt)}
+    ${extCard('Siła tnąca T', 'kN', '--t-color', ext.T.min, ext.T.max, ext.T.minAt, ext.T.maxAt)}
+    ${extCard('Siła osiowa N', 'kN', '--n-color', ext.N.min, ext.N.max, ext.N.minAt, ext.N.maxAt)}
+    ${extCard('Naprężenia normalne σ', 'MPa', '--s-color', ext.S.min/1000, ext.S.max/1000, ext.S.minAt, ext.S.maxAt)}
+  </div>
+
+  <div class="panel">
+    <h3>Reakcje podporowe <span class="tag">Ekstrema</span></h3>
+    <div class="row" style="margin-bottom:8px;">
+      <label>Wykres reakcji</label>
+      <select onchange="setEnvelopeReactionMode(this.value)">
+        <option value="max" ${envelopeReactionMode==='max'?'selected':''}>Reakcje maksymalne</option>
+        <option value="min" ${envelopeReactionMode==='min'?'selected':''}>Reakcje minimalne</option>
+        <option value="range" ${envelopeReactionMode==='range'?'selected':''}>Zakres [min .. max]</option>
+        <option value="off" ${envelopeReactionMode==='off'?'selected':''}>Ukryj reakcje</option>
+      </select>
+    </div>
+    ${envelopeReactionsTableHtml()}
+  </div>
+
+  <div class="panel">
+    <h3>Wykresy obwiedni</h3>
+    ${diagToggleRow('Obwiednia momentów M','showM',showM,'--m-color')}
+    ${diagToggleRow('Obwiednia sił tnących T','showT',showT,'--t-color')}
+    ${diagToggleRow('Obwiednia sił osiowych N','showN',showN,'--n-color')}
+    ${diagToggleRow('Obwiednia naprężeń σ','showStress',showStress,'--s-color')}
+    ${(showN||showT||showM||showStress) ? diagramSliderHtml() : ''}
+  </div>
+
+  ${probePanelHtml()}
+  `;
+  return html;
+}
+
+function envelopeReactionsTableHtml(){
+  const supNodes = nodes.filter(n=>n.support);
+  if(supNodes.length===0) return '<div class="muted">Model nie ma podpór.</div>';
+  let rows='';
+  supNodes.forEach(n=>{
+    const renv = (solved.reactionsEnvelope && solved.reactionsEnvelope[n.id]) || {Rx_min:0,Rx_max:0,Ry_min:0,Ry_max:0,Rm_min:0,Rm_max:0};
+    rows+=`<tr>
+      <td>W${n.id}</td>
+      <td style="font-size:11px;">[${fmtSmart(renv.Rx_min)} .. ${fmtSmart(renv.Rx_max)}]</td>
+      <td style="font-size:11px;">[${fmtSmart(renv.Ry_min)} .. ${fmtSmart(renv.Ry_max)}]</td>
+      <td style="font-size:11px;">[${fmtSmart(renv.Rm_min)} .. ${fmtSmart(renv.Rm_max)}]</td>
+    </tr>`;
+  });
+  return `<table class="rtab"><thead><tr><th>Węzeł</th><th>Rx [kN]</th><th>Ry [kN]</th><th>M [kNm]</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 function panelHarmonicResults(){
@@ -5005,6 +6035,49 @@ function panelHarmonicResults(){
     ${diagToggleRow('Moment zginający M_dyn','showM',showM,'--m-color')}
     ${diagToggleRow('Naprężenia σ_dyn','showStress',showStress,'--s-color')}
     ${(showN||showT||showM||showStress) ? diagramSliderHtml() : ''}
+  </div>
+
+  ${probePanelHtml()}
+  `;
+  return html;
+}
+
+function panelInfluenceResults(){
+  const el = getElement(solved.ilElementId);
+  const endLbl = solved.ilEnd==='start' ? `węzeł początkowy (W${el?el.n1:'?'})` : `węzeł końcowy (W${el?el.n2:'?'})`;
+  function posLabel(pos){ return pos ? `P${pos.elId}, x = ${fmt(pos.x,2)} m` : '—'; }
+  function extRow(label, unit, colorVar, ext){
+    return `<div class="card" style="margin-top:6px;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;">
+        <span style="font-weight:600;font-size:12px;"><span class="swatch" style="background:var(${colorVar});display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;"></span>${label}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:4px;">
+        <span style="color:var(--text-dim);font-size:11px;">Maks. dodatnia:</span>
+        <span style="font-family:var(--mono);font-size:12px;">${fmtSmart(ext.max)}${unit} &nbsp;(${posLabel(ext.maxAt)})</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:2px;">
+        <span style="color:var(--text-dim);font-size:11px;">Maks. ujemna:</span>
+        <span style="font-family:var(--mono);font-size:12px;">${fmtSmart(ext.min)}${unit} &nbsp;(${posLabel(ext.minAt)})</span>
+      </div>
+    </div>`;
+  }
+  let html = `<div class="panel">
+    <h3>Linia wpływu <span class="tag">rozwiązano</span></h3>
+    ${solveWarning ? `<div class="warn">${solveWarning}</div>` : ''}
+    <div class="muted" style="line-height:1.4;">
+      Przekrój: pręt <b>P${solved.ilElementId}</b>, ${endLbl}. Rzędna linii wpływu w danym punkcie to wartość siły w przekroju wywołana jednostkowym obciążeniem poprzecznym (prostopadłym do pręta) przyłożonym w tym punkcie — realny efekt dla obciążenia P uzyskuje się mnożąc rzędną przez P.
+    </div>
+    ${extRow('Siła osiowa N — linia wpływu', '', '--n-color', solved.extremes.N)}
+    ${extRow('Siła tnąca T — linia wpływu', '', '--t-color', solved.extremes.T)}
+    ${extRow('Moment zginający M — linia wpływu', ' m', '--m-color', solved.extremes.M)}
+  </div>
+
+  <div class="panel">
+    <h3>Widok wyników</h3>
+    ${diagToggleRow('Linia wpływu N','showN',showN,'--n-color')}
+    ${diagToggleRow('Linia wpływu T','showT',showT,'--t-color')}
+    ${diagToggleRow('Linia wpływu M','showM',showM,'--m-color')}
+    ${(showN||showT||showM) ? diagramSliderHtml() : ''}
   </div>
 
   ${probePanelHtml()}
@@ -5208,7 +6281,10 @@ function probePanelHtml(){
   const el=getElement(probe.elId);
   const L=elLength(el);
   const options = elements.map(e=>`<option value="${e.id}" ${e.id===probe.elId?'selected':''}>P${e.id} (W${e.n1}→W${e.n2})</option>`).join('');
-  const readoutHtml = (diagrams && diagrams[probe.elId]) ? probeReadoutHtml() : '<div class="muted">Uruchom obliczenia, aby odczytać dokładne wyniki.</div>';
+  const isInfluence = solved && solved.type==='influence';
+  const isEnvelope = solved && solved.type==='envelope';
+  const hasData = isEnvelope ? (solved.envelopeData && !!solved.envelopeData[probe.elId]) : (isInfluence ? (ilDiagrams && !!ilDg(probe.elId)) : (diagrams && !!diagrams[probe.elId]));
+  const readoutHtml = hasData ? probeReadoutHtml() : '<div class="muted">Uruchom obliczenia, aby odczytać dokładne wyniki.</div>';
   return `<div class="panel"><h3>Sonda wyników <span class="tag">dokładny odczyt</span></h3>
     <div class="row"><label>Pręt</label><select id="probeElSel" onchange="setProbeElement(parseInt(this.value))">${options}</select></div>
     <div class="row"><label>Pozycja x</label><input type="range" id="probeSlider" min="0" max="100" step="0.5" value="${probe.t*100}" oninput="setProbeT(this.value/100)"><span class="unit" id="probeXLbl" style="width:56px;">${fmt(probe.t*L,2)} m</span></div>
@@ -5217,8 +6293,98 @@ function probePanelHtml(){
   </div>`;
 }
 function probeReadoutHtml(){
-  const dg=diagrams[probe.elId]; const x=probe.t*dg.L;
   const idx = elements.findIndex(e=>e.id===probe.elId);
+
+  if(solved.type === 'envelope'){
+    const env = solved.envelopeData && solved.envelopeData[probe.elId];
+    if(!env) return '<div class="muted">Brak danych obwiedni dla tego pręta.</div>';
+    const x = probe.t * env.L;
+    const pts = env.pts;
+    const nSeg = pts.length - 1;
+    const s = Math.max(0, Math.min(nSeg, probe.t * nSeg));
+    const i0 = Math.floor(s);
+    const i1 = Math.min(nSeg, i0 + 1);
+    const frac = s - i0;
+    const p0 = pts[i0], p1 = pts[i1];
+
+    const lerp = (a, b) => a + (b - a) * frac;
+    const M_max = lerp(p0.M_max, p1.M_max);
+    const M_min = lerp(p0.M_min, p1.M_min);
+    const V_max = lerp(p0.V_max, p1.V_max);
+    const V_min = lerp(p0.V_min, p1.V_min);
+    const N_max = lerp(p0.N_max, p1.N_max);
+    const N_min = lerp(p0.N_min, p1.N_min);
+    const sigTop_max = lerp(p0.sigTop_max, p1.sigTop_max) / 1000;
+    const sigTop_min = lerp(p0.sigTop_min, p1.sigTop_min) / 1000;
+    const sigBot_max = lerp(p0.sigBot_max, p1.sigBot_max) / 1000;
+    const sigBot_min = lerp(p0.sigBot_min, p1.sigBot_min) / 1000;
+
+    return `
+    <div style="display:flex;justify-content:space-between;margin:6px 0 4px 0;font-size:11.5px;color:var(--text-dim);">
+      <span>Pozycja x: <strong style="color:var(--text);font-family:var(--mono);">${fmt(x,3)} m</strong></span>
+      <span>Długość L: <strong style="color:var(--text);font-family:var(--mono);">${fmt(env.L,3)} m</strong></span>
+    </div>
+    <table class="probetable">
+      <thead>
+        <tr>
+          <th>Wielkość</th>
+          <th style="color:var(--text);text-align:right;">Maks.</th>
+          <th style="color:var(--text);text-align:right;">Min.</th>
+          <th style="color:var(--text-dim);text-align:right;">Rozpiętość Δ</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="swatch" style="background:var(--m-color);"></span><strong>M</strong> <span class="muted">[kNm]</span></td>
+          <td style="color:var(--m-color);font-weight:600;">${fmt(M_max,3)}</td>
+          <td style="color:var(--m-color);font-weight:600;">${fmt(M_min,3)}</td>
+          <td>${fmt(M_max - M_min,3)}</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--t-color);"></span><strong>T</strong> <span class="muted">[kN]</span></td>
+          <td style="color:var(--t-color);font-weight:600;">${fmt(V_max,3)}</td>
+          <td style="color:var(--t-color);font-weight:600;">${fmt(V_min,3)}</td>
+          <td>${fmt(V_max - V_min,3)}</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--n-color);"></span><strong>N</strong> <span class="muted">[kN]</span></td>
+          <td style="color:var(--n-color);font-weight:600;">${fmt(N_max,3)}</td>
+          <td style="color:var(--n-color);font-weight:600;">${fmt(N_min,3)}</td>
+          <td>${fmt(N_max - N_min,3)}</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--s-color);"></span><strong>σ góra</strong> <span class="muted">[MPa]</span></td>
+          <td>${fmt(sigTop_max,2)}</td>
+          <td>${fmt(sigTop_min,2)}</td>
+          <td>${fmt(sigTop_max - sigTop_min,2)}</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--s-color);"></span><strong>σ dół</strong> <span class="muted">[MPa]</span></td>
+          <td>${fmt(sigBot_max,2)}</td>
+          <td>${fmt(sigBot_min,2)}</td>
+          <td>${fmt(sigBot_max - sigBot_min,2)}</td>
+        </tr>
+      </tbody>
+    </table>`;
+  }
+
+  if(solved.type === 'influence'){
+    const dg = ilDg(probe.elId);
+    const x = probe.t*dg.L;
+    const prN = FEM.pointResults(solved.byType.N.results[idx], x);
+    const prT = FEM.pointResults(solved.byType.T.results[idx], x);
+    const prM = FEM.pointResults(solved.byType.M.results[idx], x);
+    return `<div class="probeval">
+      <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
+      <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
+      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
+      <div><span class="k">Rzędna l.w. N (—)</span><span class="v">${fmt(prN.v_local,4)}</span></div>
+      <div><span class="k">Rzędna l.w. T (—)</span><span class="v">${fmt(prT.v_local,4)}</span></div>
+      <div><span class="k">Rzędna l.w. M (m)</span><span class="v">${fmt(prM.v_local,4)}</span></div>
+    </div>`;
+  }
+
+  const dg=diagrams[probe.elId]; const x=probe.t*dg.L;
 
   if(solved.type === 'stability'){
     const mode = solved.modes[solved.currentMode || 0];
@@ -5286,11 +6452,13 @@ function probeReadoutHtml(){
 function setProbeElement(id){ probe.elId=id; probe.t=0.5; renderSidebar(); render(); }
 function setProbeT(t){
   probe.t=Math.max(0,Math.min(1,parseFloat(t)));
-  const dg = diagrams? diagrams[probe.elId] : null;
+  const isInfluence = solved && solved.type==='influence';
+  const isEnvelope = solved && solved.type==='envelope';
+  const dg = isEnvelope ? (solved.envelopeData && solved.envelopeData[probe.elId]) : (isInfluence ? ilDg(probe.elId) : (diagrams? diagrams[probe.elId] : null));
   const L = dg? dg.L : elLength(getElement(probe.elId));
   const lbl=document.getElementById('probeXLbl'); if(lbl) lbl.textContent=fmt(probe.t*L,2)+' m';
   const ro=document.getElementById('probeReadout');
-  if(ro && diagrams && diagrams[probe.elId]) ro.innerHTML=probeReadoutHtml();
+  if(ro && dg) ro.innerHTML=probeReadoutHtml();
   render();
 }
 
