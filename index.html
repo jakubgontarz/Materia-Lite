@@ -2019,7 +2019,7 @@ function solveEnvelope(model, options){
   };
 }
 
-window.FEM = { solveModel, solveStability, solveModal, solveHarmonic, pointResults, solveInfluenceLine, solveEnvelope };
+window.FEM = { solveModel, solveLinearStatic: solveModel, solveStability, solveModal, solveHarmonic, pointResults, solveInfluenceLine, solveEnvelope };
 })();
 
 function zerosMat(r,c){return Array.from({length:r},()=>new Array(c).fill(0));}
@@ -2272,10 +2272,30 @@ let ilDiagrams=null;         // influence lines: {N:{elId:{pts,L,c,s,n1}}, T:{..
 let solveWarning=null;
 let showDeform=false, showM=false, showT=false, showN=false, showStress=false, showReactions=false;
 let envelopeReactionMode = 'range'; // 'max' | 'min' | 'range' | 'off'
-// remembers the user's last chosen result-view toggles across re-solves (invalidateResults
-// resets the live show* flags every edit, but we want "Oblicz" to restore whatever the
-// person had been looking at, not always snap back to the bare deformation view).
-let lastResultView={showDeform:true, showM:false, showT:false, showN:false, showStress:false, showReactions:true};
+
+// remembers the user's chosen result-view toggles per analysis type across re-solves
+let lastResultViewsPerType = {
+  linear_static: { showDeform:true, showM:false, showT:false, showN:false, showStress:false, showReactions:true },
+  stability:     { showDeform:true, showM:false, showT:false, showN:false, showStress:false, showReactions:false, modeIndex:0, modalSign:1 },
+  modal:         { showDeform:true, showM:false, showT:false, showN:false, showStress:false, showReactions:false, modeIndex:0, modalSign:1 },
+  harmonic:      { showDeform:false, showM:true, showT:false, showN:false, showStress:false, showReactions:true, combKey:'stat_plus_dyn' },
+  influence:     { showDeform:false, showM:true, showT:false, showN:false, showStress:false, showReactions:false },
+  envelope:      { showDeform:false, showM:true, showT:false, showN:false, showStress:false, showReactions:true, reactionMode:'range' }
+};
+let lastResultView = lastResultViewsPerType.linear_static;
+
+function restoreResultViewForType(type){
+  const v = lastResultViewsPerType[type] || lastResultViewsPerType.linear_static;
+  showDeform = !!v.showDeform;
+  showM = !!v.showM;
+  showT = !!v.showT;
+  showN = !!v.showN;
+  showStress = !!v.showStress;
+  showReactions = !!v.showReactions;
+  if(type === 'envelope' && v.reactionMode){
+    envelopeReactionMode = v.reactionMode;
+  }
+}
 
 /* ---- program options (persist across model edits & undo/redo, NOT part of the structural model) ---- */
 const STORAGE_OPTIONS_KEY = 'materia_lite_user_options';
@@ -2286,6 +2306,7 @@ let includeSelfWeight=false;
 let hideLoadsSupportsInResults=false;
 let showBackgroundGrid=true;
 let showIdLabels=false;
+let showDimensionLines=false;
 
 function saveAppOptionsToStorage(){
   try {
@@ -2295,7 +2316,9 @@ function saveAppOptionsToStorage(){
       includeSelfWeight,
       hideLoadsSupportsInResults,
       showBackgroundGrid,
-      showIdLabels
+      showIdLabels,
+      showDimensionLines,
+      snapSize
     };
     localStorage.setItem(STORAGE_OPTIONS_KEY, JSON.stringify(opts));
   } catch(e){}
@@ -2324,6 +2347,12 @@ function loadAppOptionsFromStorage(){
     }
     if(opts && typeof opts.showIdLabels === 'boolean'){
       showIdLabels = opts.showIdLabels;
+    }
+    if(opts && typeof opts.showDimensionLines === 'boolean'){
+      showDimensionLines = opts.showDimensionLines;
+    }
+    if(opts && typeof opts.snapSize === 'number' && opts.snapSize > 0){
+      snapSize = opts.snapSize;
     }
   } catch(e){}
 }
@@ -2593,12 +2622,7 @@ function runLinearStaticAnalysis(){
   magM=maxM; magT=maxT; magN=maxN; magS=maxS;
   magReaction = Math.max(...solved.Rglobal.map(v=>Math.abs(v)), 0);
   deformMult=1; diagMult=1;
-  showDeform=lastResultView.showDeform;
-  showM=lastResultView.showM;
-  showT=lastResultView.showT;
-  showN=lastResultView.showN;
-  showStress=lastResultView.showStress;
-  showReactions=lastResultView.showReactions;
+  restoreResultViewForType('linear_static');
   if(elements.length && probe.elId==null) probe.elId = elements[0].id;
   renderSidebar();
   render();
@@ -2610,6 +2634,8 @@ function prepareBucklingDiagrams(modeIndex){
   const mode = solved.modes[modeIndex];
   if(!mode) return;
   solved.currentMode = modeIndex;
+  lastResultViewsPerType.stability.modeIndex = modeIndex;
+  const sign = (solved.modalSign != null) ? solved.modalSign : 1;
 
   diagrams = {};
   let maxDisp = 0, maxM = 0, maxT = 0, maxN = 0, maxS = 0;
@@ -2622,7 +2648,20 @@ function prepareBucklingDiagrams(modeIndex){
     for(let i=0; i<=NSAMP; i++){
       const x = ed.L * i / NSAMP;
       const staticPr = FEM.pointResults(staticEdRes, x);
-      const ptMode = mode.evalPoint(idx, x, staticPr);
+      const rawPt = mode.evalPoint(idx, x, staticPr);
+      const ptMode = {
+        ...rawPt,
+        N: rawPt.N * sign,
+        V: rawPt.V * sign,
+        M: rawPt.M * sign,
+        u_local: rawPt.u_local * sign,
+        v_local: rawPt.v_local * sign,
+        theta: rawPt.theta * sign,
+        Ux_global: rawPt.Ux_global * sign,
+        Uy_global: rawPt.Uy_global * sign,
+        sigTop: rawPt.sigTop * sign,
+        sigBot: rawPt.sigBot * sign
+      };
       pts.push(ptMode);
       maxDisp = Math.max(maxDisp, Math.hypot(ptMode.Ux_global, ptMode.Uy_global));
       maxM = Math.max(maxM, Math.abs(ptMode.M));
@@ -2648,6 +2687,17 @@ function prepareBucklingDiagrams(modeIndex){
 function setBucklingMode(idx){
   if(!solved || solved.type!=='stability' || !solved.modes || !solved.modes[idx]) return;
   prepareBucklingDiagrams(idx);
+  renderSidebar();
+  render();
+}
+
+function invertStabilitySign(){
+  if(!solved || solved.type !== 'stability') return;
+  solved.modalSign = (solved.modalSign === -1) ? 1 : -1;
+  if(lastResultViewsPerType.stability){
+    lastResultViewsPerType.stability.modalSign = solved.modalSign;
+  }
+  prepareBucklingDiagrams(solved.currentMode || 0);
   renderSidebar();
   render();
 }
@@ -2698,10 +2748,15 @@ function runStabilityAnalysis(){
     solved=null; diagrams=null; renderSidebar(); render(); updateRunButton(); return;
   }
 
+  const prevMode = (lastResultViewsPerType.stability && lastResultViewsPerType.stability.modeIndex != null) ? lastResultViewsPerType.stability.modeIndex : 0;
+  const activeMode = (prevMode >= 0 && prevMode < out.modes.length) ? prevMode : 0;
+  const modalSign = (lastResultViewsPerType.stability && lastResultViewsPerType.stability.modalSign != null) ? lastResultViewsPerType.stability.modalSign : 1;
+
   solved = {
     type: 'stability',
     modes: out.modes,
-    currentMode: 0,
+    currentMode: activeMode,
+    modalSign: modalSign,
     staticSolved: out.staticSolved,
     elemData: out.elemData,
     nodeIndex: out.nodeIndex,
@@ -2710,16 +2765,11 @@ function runStabilityAnalysis(){
   };
 
   solveWarning = null;
-  prepareBucklingDiagrams(0);
+  prepareBucklingDiagrams(activeMode);
 
   deformMult = 1;
   diagMult = 1;
-  showDeform = true;
-  showM = false;
-  showT = false;
-  showN = false;
-  showStress = false;
-  showReactions = false;
+  restoreResultViewForType('stability');
 
   renderSidebar();
   render();
@@ -2732,6 +2782,8 @@ function prepareModalDiagrams(modeIndex){
   const mode = solved.modes[modeIndex];
   if(!mode) return;
   solved.currentMode = modeIndex;
+  lastResultViewsPerType.modal.modeIndex = modeIndex;
+  const sign = (solved.modalSign != null) ? solved.modalSign : 1;
 
   diagrams = {};
   let maxDisp = 0, maxM = 0, maxT = 0, maxN = 0, maxS = 0;
@@ -2742,7 +2794,20 @@ function prepareModalDiagrams(modeIndex){
     const pts = [];
     for(let i = 0; i <= NSAMP; i++){
       const x = ed.L * i / NSAMP;
-      const ptMode = mode.evalPoint(idx, x);
+      const rawPt = mode.evalPoint(idx, x);
+      const ptMode = {
+        ...rawPt,
+        N: rawPt.N * sign,
+        V: rawPt.V * sign,
+        M: rawPt.M * sign,
+        u_local: rawPt.u_local * sign,
+        v_local: rawPt.v_local * sign,
+        theta: rawPt.theta * sign,
+        Ux_global: rawPt.Ux_global * sign,
+        Uy_global: rawPt.Uy_global * sign,
+        sigTop: rawPt.sigTop * sign,
+        sigBot: rawPt.sigBot * sign
+      };
       pts.push(ptMode);
       maxDisp = Math.max(maxDisp, Math.hypot(ptMode.Ux_global, ptMode.Uy_global));
       maxM = Math.max(maxM, Math.abs(ptMode.M));
@@ -2768,6 +2833,17 @@ function prepareModalDiagrams(modeIndex){
 function setModalMode(idx){
   if(!solved || solved.type !== 'modal' || !solved.modes || !solved.modes[idx]) return;
   prepareModalDiagrams(idx);
+  renderSidebar();
+  render();
+}
+
+function invertModalSign(){
+  if(!solved || solved.type !== 'modal') return;
+  solved.modalSign = (solved.modalSign === -1) ? 1 : -1;
+  if(lastResultViewsPerType.modal){
+    lastResultViewsPerType.modal.modalSign = solved.modalSign;
+  }
+  prepareModalDiagrams(solved.currentMode || 0);
   renderSidebar();
   render();
 }
@@ -2819,27 +2895,27 @@ function runModalAnalysis(){
     solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
   }
 
+  const prevMode = (lastResultViewsPerType.modal && lastResultViewsPerType.modal.modeIndex != null) ? lastResultViewsPerType.modal.modeIndex : 0;
+  const activeMode = (prevMode >= 0 && prevMode < out.modes.length) ? prevMode : 0;
+  const modalSign = (lastResultViewsPerType.modal && lastResultViewsPerType.modal.modalSign != null) ? lastResultViewsPerType.modal.modalSign : 1;
+
   solved = {
     type: 'modal',
     modes: out.modes,
-    currentMode: 0,
+    currentMode: activeMode,
+    modalSign: modalSign,
     elemData: out.elemData,
     nodeIndex: out.nodeIndex,
     Rglobal: zerosVec(3 * nodes.length),
-    results: out.modes[0].results
+    results: out.modes[activeMode].results
   };
 
   solveWarning = null;
-  prepareModalDiagrams(0);
+  prepareModalDiagrams(activeMode);
 
   deformMult = 1;
   diagMult = 1;
-  showDeform = true;
-  showM = false;
-  showT = false;
-  showN = false;
-  showStress = false;
-  showReactions = false;
+  restoreResultViewForType('modal');
 
   renderSidebar();
   render();
@@ -2847,62 +2923,192 @@ function runModalAnalysis(){
   setStatusHint(`Obliczono drgania własne: ${out.modes.length} ${out.modes.length === 1 ? 'forma drgań' : 'formy drgań'} (Mod 1: f = ${fmtSmart(out.modes[0].f, 3)} Hz, T = ${fmtSmart(out.modes[0].T, 4)} s).`);
 }
 
-function runHarmonicAnalysis(){
-  if(nodes.length < 2 || elements.length < 1){
-    solveWarning = 'Dodaj co najmniej dwa węzły i jeden pręt, aby uruchomić obliczenia.';
-    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+const HARMONIC_COMBS = {
+  'stat_plus_dyn': {
+    id: 'stat_plus_dyn',
+    name: 'Stan 1: +F_stat + F_bezwł (+ G)',
+    shortName: '+F_stat + F_bezwł',
+    sStat: 1,
+    sInertia: 1,
+    sGrav: 1,
+    desc: 'Siła statyczna + siły bezwładności + grawitacja'
+  },
+  'stat_minus_dyn': {
+    id: 'stat_minus_dyn',
+    name: 'Stan 2: +F_stat − F_bezwł (+ G)',
+    shortName: '+F_stat − F_bezwł',
+    sStat: 1,
+    sInertia: -1,
+    sGrav: 1,
+    desc: 'Siła statyczna − siły bezwładności + grawitacja'
+  },
+  'neg_stat_plus_dyn': {
+    id: 'neg_stat_plus_dyn',
+    name: 'Stan 3: −F_stat + F_bezwł (+ G)',
+    shortName: '−F_stat + F_bezwł',
+    sStat: -1,
+    sInertia: 1,
+    sGrav: 1,
+    desc: '−Siła statyczna + siły bezwładności + grawitacja'
+  },
+  'neg_stat_minus_dyn': {
+    id: 'neg_stat_minus_dyn',
+    name: 'Stan 4: −F_stat − F_bezwł (+ G)',
+    shortName: '−F_stat − F_bezwł',
+    sStat: -1,
+    sInertia: -1,
+    sGrav: 1,
+    desc: '−Siła statyczna − siły bezwładności + grawitacja'
+  },
+  'dyn_only': {
+    id: 'dyn_only',
+    name: 'Tylko siły bezwładności F_bezwł',
+    shortName: 'Tylko F_bezwł',
+    sStat: 0,
+    sInertia: 1,
+    sGrav: 0,
+    desc: 'Amplituda samych sił bezwładności (bez składowej statycznej)'
+  },
+  'stat_only': {
+    id: 'stat_only',
+    name: 'Tylko obciążenie statyczne F_stat',
+    shortName: 'Tylko F_stat',
+    sStat: 1,
+    sInertia: 0,
+    sGrav: 0,
+    desc: 'Odpowiedź statyczna na przyłożone obciążenia'
   }
-  const hasAnySupport = nodes.some(n => n.support && (
-    (n.support.ux && n.support.ux.type !== 'free') || (n.support.uy && n.support.uy.type !== 'free') || (n.support.rz && n.support.rz.type !== 'free')));
-  if(!hasAnySupport){
-    solveWarning = 'Model nie ma zdefiniowanych podpór — układ jest niestabilny.';
-    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
-  }
+};
 
-  const model = buildSolverModel();
-  const freqHz = (analysisSettings && analysisSettings.params && analysisSettings.params.harmonicFreq != null) ?
-                 Math.max(0, parseFloat(analysisSettings.params.harmonicFreq) || 0) : 5.0;
+function buildHarmonicModels(){
   const includeElementMass = !(analysisSettings && analysisSettings.params && analysisSettings.params.includeElementMass === false);
+  const includeGravity = !!(analysisSettings && analysisSettings.params && analysisSettings.params.includeGravity);
 
-  let out;
-  try{
-    out = FEM.solveHarmonic(model, freqHz, { includeElementMass });
-  } catch(e){
-    solveWarning = 'Błąd analizy harmonicznej: ' + e.message;
-    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  // 1. Applied static & dynamic loads model (without gravity)
+  const staticModel = buildSolverModel();
+
+  // 2. Gravity model (vertical downward nodal masses and self-weight)
+  let gravityModel = null;
+  if(includeGravity){
+    const nodesArr = nodes.map(n => ({ id: n.id, x: n.x, y: n.y, mass: n.mass }));
+    const elementsArr = elements.map(el => {
+      const mat = getMaterial(el.materialId), sec = getSection(el.sectionId);
+      const E = mat.E * UNIT.GPa, A_real = sec.A * UNIT.cm2, I = sec.I * UNIT.cm4, alpha = mat.alpha * UNIT.alphaU;
+      const cTopCm = (sec.cTop != null) ? sec.cTop : (sec.h || 0) / 2;
+      const cBotCm = (sec.cBot != null) ? sec.cBot : (sec.h || 0) / 2;
+      const cTop = cTopCm * UNIT.cm, cBot = cBotCm * UNIT.cm, h = (cTopCm + cBotCm) * UNIT.cm;
+      const A = includeAxialDeformation ? A_real : A_real * AXIAL_RIGID_FACTOR;
+      const density = (mat.density != null) ? mat.density : 7850;
+      const obj = { id: el.id, n1: el.n1, n2: el.n2, E, A, A_real, I, alpha, h, cTop, cBot, density, hingeStart: !!el.hingeStart, hingeEnd: !!el.hingeEnd };
+      if(includeElementMass){
+        obj.selfWeightQ = mat.density * 9.81 / 1000 * A_real; // kN/m downwards
+      }
+      return obj;
+    });
+    const supportsArr = nodes.filter(n => n.support).map(n => {
+      const sp = n.support;
+      function conv(dir, isRot){
+        if(!dir || dir.type === 'free') return { type: 'free' };
+        if(dir.type === 'fixed') return { type: 'fixed', delta: 0 };
+        return { type: 'spring', k: dir.k || 0, delta: 0 };
+      }
+      return { nodeId: n.id, angleDeg: sp.angleDeg || 0, ux: conv(sp.ux, false), uy: conv(sp.uy, false), rz: conv(sp.rz, true) };
+    });
+    const nodalLoads = [];
+    nodes.forEach(n => {
+      if(n.mass && n.mass.my){
+        const mKg = n.mass.my || 0;
+        if(mKg > 0){
+          nodalLoads.push({ nodeId: n.id, Fx: 0, Fy: -(mKg * 9.81 / 1000), M: 0 }); // kN downwards
+        }
+      }
+    });
+    gravityModel = { nodes: nodesArr, elements: elementsArr, supports: supportsArr, nodalLoads };
   }
 
-  solved = {
-    type: 'harmonic',
-    freqHz: out.freqHz,
-    omega: out.omega,
-    D: out.D,
-    Rglobal: out.Rglobal,
-    results: out.results,
-    elemData: out.elemData,
-    nodeIndex: out.nodeIndex,
-    singular: out.singular
-  };
+  return { staticModel, gravityModel, includeElementMass, includeGravity };
+}
 
-  solveWarning = out.singular ? 'Wykryto osobliwość lub rezonans dokładny (brak tłumienia) — układ dynamiczny jest w rezonansie.' : null;
+function prepareHarmonicCombination(combKey){
+  if(!solved || solved.type !== 'harmonic') return;
+  const cfg = HARMONIC_COMBS[combKey] || HARMONIC_COMBS['stat_plus_dyn'];
+  solved.combKey = cfg.id;
+  if(lastResultViewsPerType.harmonic){
+    lastResultViewsPerType.harmonic.combKey = cfg.id;
+  }
+
+  const sStat = cfg.sStat;
+  const sInertia = cfg.sInertia;
+  const sGrav = cfg.sGrav;
+  const staticSol = solved.staticSol;
+  const dynSol = solved.dynSol;
+  const gravSol = solved.gravSol;
+
+  const nDof = 3 * nodes.length;
+  solved.D = zerosVec(nDof);
+  solved.Rglobal = zerosVec(nDof);
+
+  for(let i = 0; i < nDof; i++){
+    const statD = staticSol ? staticSol.D[i] : 0;
+    const harmD = dynSol ? dynSol.D[i] : 0;
+    const inertD = harmD - statD;
+    const gravD = (sGrav && gravSol) ? gravSol.D[i] : 0;
+
+    solved.D[i] = sStat * statD + sInertia * inertD + gravD;
+
+    const statR = staticSol ? staticSol.Rglobal[i] : 0;
+    const harmR = dynSol ? dynSol.Rglobal[i] : 0;
+    const inertR = harmR - statR;
+    const gravR = (sGrav && gravSol) ? gravSol.Rglobal[i] : 0;
+
+    solved.Rglobal[i] = sStat * statR + sInertia * inertR + gravR;
+  }
 
   diagrams = {};
   let maxDisp = 0, maxM = 0, maxT = 0, maxN = 0, maxS = 0;
   const NSAMP = 40;
-  solved.results.forEach((edRes, idx) => {
-    const elId = elements[idx].id;
+
+  elements.forEach((el, idx) => {
+    const elId = el.id;
+    const edDyn = dynSol.elemData[idx];
+    const L = edDyn.L;
     const pts = [];
     for(let i = 0; i <= NSAMP; i++){
-      const x = edRes.L * i / NSAMP;
-      const pr = FEM.pointResults(edRes, x);
+      const x = L * i / NSAMP;
+      const prStat = staticSol ? FEM.pointResults(staticSol.results[idx], x) : { N:0, V:0, M:0, u_local:0, v_local:0, theta:0, Ux_global:0, Uy_global:0, sigTop:0, sigBot:0 };
+      const prHarm = FEM.pointResults(dynSol.results[idx], x);
+      const prGrav = (sGrav && gravSol) ? FEM.pointResults(gravSol.results[idx], x) : null;
+
+      function combVal(key){
+        const vStat = prStat[key] || 0;
+        const vHarm = prHarm[key] || 0;
+        const vInert = vHarm - vStat;
+        const vGrav = prGrav ? (prGrav[key] || 0) : 0;
+        return sStat * vStat + sInertia * vInert + vGrav;
+      }
+
+      const pr = {
+        x,
+        N: combVal('N'),
+        V: combVal('V'),
+        M: combVal('M'),
+        u_local: combVal('u_local'),
+        v_local: combVal('v_local'),
+        theta: combVal('theta'),
+        Ux_global: combVal('Ux_global'),
+        Uy_global: combVal('Uy_global'),
+        sigTop: combVal('sigTop'),
+        sigBot: combVal('sigBot')
+      };
       pts.push(pr);
+
       maxDisp = Math.max(maxDisp, Math.hypot(pr.Ux_global, pr.Uy_global));
       maxM = Math.max(maxM, Math.abs(pr.M));
       maxT = Math.max(maxT, Math.abs(pr.V));
       maxN = Math.max(maxN, Math.abs(pr.N));
       maxS = Math.max(maxS, Math.abs(pr.sigTop), Math.abs(pr.sigBot));
     }
-    diagrams[elId] = { pts, L: edRes.L, c: edRes.c, s: edRes.s, n1: getNode(elements[idx].n1) };
+    diagrams[elId] = { pts, L, c: edDyn.c, s: edDyn.s, n1: getNode(el.n1) };
   });
 
   const bbox = modelBBox();
@@ -2917,12 +3123,80 @@ function runHarmonicAnalysis(){
   let maxR = 0;
   for(let i = 0; i < solved.Rglobal.length; i++) maxR = Math.max(maxR, Math.abs(solved.Rglobal[i]));
   magReaction = maxR;
+}
+
+function setHarmonicCombination(combKey){
+  if(!solved || solved.type !== 'harmonic') return;
+  prepareHarmonicCombination(combKey);
+  renderSidebar();
+  render();
+}
+
+function runHarmonicAnalysis(){
+  if(nodes.length < 2 || elements.length < 1){
+    solveWarning = 'Dodaj co najmniej dwa węzły i jeden pręt, aby uruchomić obliczenia.';
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+  const hasAnySupport = nodes.some(n => n.support && (
+    (n.support.ux && n.support.ux.type !== 'free') || (n.support.uy && n.support.uy.type !== 'free') || (n.support.rz && n.support.rz.type !== 'free')));
+  if(!hasAnySupport){
+    solveWarning = 'Model nie ma zdefiniowanych podpór — układ jest niestabilny.';
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  const { staticModel, gravityModel, includeElementMass, includeGravity } = buildHarmonicModels();
+  const freqHz = (analysisSettings && analysisSettings.params && analysisSettings.params.harmonicFreq != null) ?
+                 Math.max(0, parseFloat(analysisSettings.params.harmonicFreq) || 0) : 5.0;
+
+  let staticSol = null, dynSol = null, gravSol = null;
+  try{
+    staticSol = FEM.solveLinearStatic(staticModel);
+    dynSol = FEM.solveHarmonic(staticModel, freqHz, { includeElementMass });
+    if(gravityModel){
+      gravSol = FEM.solveLinearStatic(gravityModel);
+    }
+  } catch(e){
+    solveWarning = 'Błąd analizy harmonicznej: ' + e.message;
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  if(staticSol && staticSol.singular){
+    solveWarning = 'Układ jest geometrycznie zmienny lub niedostatecznie podparty — macierz sztywności jest osobliwa.';
+    solved = null; diagrams = null; renderSidebar(); render(); updateRunButton(); return;
+  }
+
+  const defaultComb = (lastResultViewsPerType.harmonic && lastResultViewsPerType.harmonic.combKey) || 'stat_plus_dyn';
+
+  solved = {
+    type: 'harmonic',
+    freqHz: dynSol.freqHz,
+    omega: dynSol.omega,
+    includeGravity,
+    includeElementMass,
+    combKey: defaultComb,
+    staticSol,
+    dynSol,
+    gravSol,
+    elemData: dynSol.elemData,
+    nodeIndex: dynSol.nodeIndex,
+    singular: dynSol.singular,
+    D: zerosVec(3 * nodes.length),
+    Rglobal: zerosVec(3 * nodes.length),
+    results: dynSol.results
+  };
+
+  solveWarning = dynSol.singular ? 'Wykryto osobliwość lub rezonans dokładny (brak tłumienia) — częstość wymuszenia pokrywa się z częstością własną układu.' : null;
+
+  prepareHarmonicCombination(defaultComb);
+
+  deformMult = 1; diagMult = 1;
+  restoreResultViewForType('harmonic');
   if(elements.length && probe.elId == null) probe.elId = elements[0].id;
 
   renderSidebar();
   render();
   updateRunButton();
-  setStatusHint(`Obliczono drgania wymuszone (f = ${fmtSmart(freqHz, 3)} Hz, ω = ${fmtSmart(out.omega, 2)} rad/s).`);
+  setStatusHint(`Obliczono drgania wymuszone (f = ${fmtSmart(freqHz, 3)} Hz, ω = ${fmtSmart(dynSol.omega, 2)} rad/s${includeGravity ? ', z grawitacją' : ''}).`);
 }
 
 function runInfluenceAnalysis(){
@@ -2992,8 +3266,7 @@ function runInfluenceAnalysis(){
   solveWarning = anySingular ? 'Układ może być geometrycznie niestabilny lub niedostatecznie podparty — wyniki mogą być błędne.' : null;
   diagrams=null;
   deformMult=1; diagMult=1;
-  showDeform=false; showReactions=false; showStress=false;
-  showM=true; showN=false; showT=false;
+  restoreResultViewForType('influence');
   probe.elId = ilElId;
   probe.t = ilEnd==='end' ? 1 : 0;
 
@@ -3055,8 +3328,7 @@ function runEnvelopeAnalysis(){
   diagrams = null;
   ilDiagrams = null;
   deformMult = 1; diagMult = 1;
-  showDeform = false; showReactions = true; showStress = false;
-  showM = true; showT = false; showN = false;
+  restoreResultViewForType('envelope');
   if(elements.length && probe.elId == null) probe.elId = elements[0].id;
 
   renderSidebar();
@@ -3473,7 +3745,7 @@ function drawArrow(fromX,fromY,toX,toY,color){
 }
 // draws a curved-arrow moment indicator; ccw for M>=0. Shared by applied nodal
 // moments and reaction moments (with a different radius so they don't collide).
-function drawMomentArc(cx,cy,M,r,color,label,offsetDeg){
+function drawMomentArc(cx,cy,M,r,color,label,offsetDeg,labelAngleDeg){
   offsetDeg = offsetDeg||0;
   const ccw = M>=0;
   const visStart = (10+offsetDeg)*Math.PI/180;
@@ -3488,13 +3760,36 @@ function drawMomentArc(cx,cy,M,r,color,label,offsetDeg){
   ctx.save(); ctx.translate(ex,ey); ctx.rotate(-tangentVis); ctx.fillStyle=color;
   ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(-7,-4); ctx.lineTo(-7,4); ctx.closePath(); ctx.fill(); ctx.restore();
   if(label){
-    // rotate the original (r+3,-r) label offset by offsetDeg (screen rotation = -offsetDeg,
-    // matching the visual-angle convention used throughout) — reduces to the exact
-    // original position when offsetDeg=0.
-    const offRad=-offsetDeg*Math.PI/180, bx=r+3, by=-r;
-    const rx=bx*Math.cos(offRad)-by*Math.sin(offRad), ry=bx*Math.sin(offRad)+by*Math.cos(offRad);
-    ctx.fillStyle=color; ctx.font='11px '+FONT_MONO; ctx.textAlign = rx<0?'right':'left';
-    ctx.fillText(label, cx+rx, cy+ry);
+    ctx.font='11px '+FONT_MONO;
+    const w=ctx.measureText(label).width;
+    const pad=3;
+    let tx, ty, align;
+    if(labelAngleDeg != null){
+      // Exact placement along a specified visual angle direction (e.g. toward element center)
+      const lRad = -labelAngleDeg * Math.PI / 180;
+      const lx = Math.cos(lRad), ly = Math.sin(lRad);
+      const dist = r + 6;
+      tx = cx + lx * dist;
+      ty = cy + ly * dist;
+      if(lx > 0.3) align = 'left';
+      else if(lx < -0.3) align = 'right';
+      else align = 'center';
+      
+      const rx = align === 'left' ? 0 : align === 'right' ? -w : -w/2;
+      ctx.fillStyle=getCss('--badge-bg');
+      ctx.fillRect(tx + rx - pad, ty - 8, w + 2*pad, 13);
+      ctx.fillStyle=color; ctx.textAlign = align;
+      ctx.fillText(label, tx, ty);
+    } else {
+      // Default nodal/reaction moment positioning: rotate the original (r+4,-r) offset
+      const offRad=-offsetDeg*Math.PI/180, bx=r+4, by=-r;
+      const rx=bx*Math.cos(offRad)-by*Math.sin(offRad), ry=bx*Math.sin(offRad)+by*Math.cos(offRad);
+      tx=cx+rx; ty=cy+ry;
+      ctx.fillStyle=getCss('--badge-bg');
+      ctx.fillRect(rx<0 ? tx - w - pad : tx - pad, ty - 8, w + 2*pad, 13);
+      ctx.fillStyle=color; ctx.textAlign = rx<0?'right':'left';
+      ctx.fillText(label, tx, ty);
+    }
   }
 }
 
@@ -3588,6 +3883,38 @@ function drawLoads(){
     }
     if(n.moment){
       drawMomentArc(p.x,p.y,n.moment.M,22,MCOLOR,fmtSmart(n.moment.M)+' kNm');
+    }
+  });
+  elements.forEach(el=>{
+    const a=getNode(el.n1), b=getNode(el.n2);
+    if(!a || !b) return;
+    const pa=toScreen(a.x,a.y), pb=toScreen(b.x,b.y);
+    const dx=pb.x-pa.x, dy=pb.y-pa.y;
+    const Lpx=Math.hypot(dx,dy)||1;
+    const ux=dx/Lpx, uy=dy/Lpx;
+    const angDeg = Math.atan2(b.y-a.y, b.x-a.x)*180/Math.PI;
+
+    // Moment za przegubem początkowym na pręcie
+    if(el.hingeStart && el.momentHingeStart && Math.abs(el.momentHingeStart) > 1e-6){
+      const rArc = 14;
+      // Przegub jest w odległości 14px od węzła pa, środek łuku o promieniu rArc przesunięty tak,
+      // aby brzeg łuku idealnie stykał się z kółkiem przegubu (14px od węzła + rArc + 5px na obrys przegubu)
+      const hingeOffPx = 14;
+      const dist = Math.min(hingeOffPx + rArc + 4, Lpx * 0.45);
+      const cx = pa.x + ux * dist;
+      const cy = pa.y + uy * dist;
+      // Przesunięcie kąta łuku o 180 stopni względem osi pręta, a etykieta wartości umieszczona w głąb pręta (angDeg)
+      drawMomentArc(cx, cy, el.momentHingeStart, rArc, MCOLOR, fmtSmart(el.momentHingeStart) + ' kNm', angDeg + 180, angDeg);
+    }
+    // Moment przed przegubem końcowym na pręcie
+    if(el.hingeEnd && el.momentHingeEnd && Math.abs(el.momentHingeEnd) > 1e-6){
+      const rArc = 14;
+      const hingeOffPx = 14;
+      const dist = Math.min(hingeOffPx + rArc + 4, Lpx * 0.45);
+      const cx = pb.x - ux * dist;
+      const cy = pb.y - uy * dist;
+      // Łuk od strony przegubu, etykieta wartości umieszczona w głąb pręta (angDeg + 180)
+      drawMomentArc(cx, cy, el.momentHingeEnd, rArc, MCOLOR, fmtSmart(el.momentHingeEnd) + ' kNm', angDeg, angDeg + 180);
     }
   });
   elements.forEach(el=>{
@@ -3748,8 +4075,24 @@ function drawDiagramType(type){
     const v0 = type==='N'?dg.pts[0].N:type==='T'?dg.pts[0].V:type==='M'?dg.pts[0].M:dg.pts[0].sigTop;
     const vE = type==='N'?dg.pts[dg.pts.length-1].N:type==='T'?dg.pts[dg.pts.length-1].V:type==='M'?dg.pts[dg.pts.length-1].M:dg.pts[dg.pts.length-1].sigTop;
     const mag = type==='N'?magN:type==='T'?magT:type==='M'?magM:magS;
-    if(!isNegligible(v0,mag)) ctx.fillText(fmtSmart(v0), offsetLine[0].x, offsetLine[0].y + (offsetLine[0].y<baseline[0].y? -4:12));
-    if(!isNegligible(vE,mag)) ctx.fillText(fmtSmart(vE), offsetLine[offsetLine.length-1].x, offsetLine[offsetLine.length-1].y + (offsetLine[offsetLine.length-1].y<baseline[baseline.length-1].y? -4:12));
+    const getYOffset = (offY, baseY) => (offY < baseY ? -10 : 12);
+    if(!isNegligible(v0,mag)) ctx.fillText(fmtSmart(v0), offsetLine[0].x, offsetLine[0].y + getYOffset(offsetLine[0].y, baseline[0].y));
+    if(!isNegligible(vE,mag)) ctx.fillText(fmtSmart(vE), offsetLine[offsetLine.length-1].x, offsetLine[offsetLine.length-1].y + getYOffset(offsetLine[offsetLine.length-1].y, baseline[baseline.length-1].y));
+
+    // label peak value along element if it exists in span
+    let peakIdx = -1, maxPeakDiff = 0;
+    for(let k = 1; k < dg.pts.length - 1; k++){
+      const vk = type==='N'?dg.pts[k].N:type==='T'?dg.pts[k].V:type==='M'?dg.pts[k].M:dg.pts[k].sigTop;
+      const diff = Math.abs(vk) - Math.max(Math.abs(v0), Math.abs(vE));
+      if(diff > maxPeakDiff && ((vk > v0 && vk > vE) || (vk < v0 && vk < vE))){
+        maxPeakDiff = diff;
+        peakIdx = k;
+      }
+    }
+    if(peakIdx > 0 && !isNegligible(maxPeakDiff, mag)){
+      const vk = type==='N'?dg.pts[peakIdx].N:type==='T'?dg.pts[peakIdx].V:type==='M'?dg.pts[peakIdx].M:dg.pts[peakIdx].sigTop;
+      ctx.fillText(fmtSmart(vk), offsetLine[peakIdx].x, offsetLine[peakIdx].y + getYOffset(offsetLine[peakIdx].y, baseline[peakIdx].y));
+    }
   });
 }
 
@@ -3784,8 +4127,9 @@ function drawInfluenceLineType(type){
     ctx.fillStyle=color; ctx.textAlign='center';
     const v0=dg.pts[0].v_local, vE=dg.pts[dg.pts.length-1].v_local;
     const mag = type==='N'?magN:type==='T'?magT:magM;
-    if(!isNegligible(v0,mag)) ctx.fillText(fmtSmart(v0), offsetLine[0].x, offsetLine[0].y + (offsetLine[0].y<baseline[0].y? -4:12));
-    if(!isNegligible(vE,mag)) ctx.fillText(fmtSmart(vE), offsetLine[offsetLine.length-1].x, offsetLine[offsetLine.length-1].y + (offsetLine[offsetLine.length-1].y<baseline[baseline.length-1].y? -4:12));
+    const getYOffset = (offY, baseY) => (offY < baseY ? -10 : 12);
+    if(!isNegligible(v0,mag)) ctx.fillText(fmtSmart(v0), offsetLine[0].x, offsetLine[0].y + getYOffset(offsetLine[0].y, baseline[0].y));
+    if(!isNegligible(vE,mag)) ctx.fillText(fmtSmart(vE), offsetLine[offsetLine.length-1].x, offsetLine[offsetLine.length-1].y + getYOffset(offsetLine[offsetLine.length-1].y, baseline[baseline.length-1].y));
   });
 }
 
@@ -3868,19 +4212,20 @@ function drawEnvelopeDiagram(type){
     let valEMax = type==='M'? ptE.M_max : type==='T'? ptE.V_max : type==='N'? ptE.N_max : Math.max(ptE.sigTop_max, ptE.sigBot_max);
     let valEMin = type==='M'? ptE.M_min : type==='T'? ptE.V_min : type==='N'? ptE.N_min : Math.min(ptE.sigTop_min, ptE.sigBot_min);
 
-    const drawLabel = (text, x, y) => {
+    const drawLabel = (text, x, y, isAbove) => {
       const w = ctx.measureText(text).width;
+      const yOff = isAbove ? -5 : 2;
       ctx.fillStyle = getCss('--badge-bg');
-      ctx.fillRect(x - w/2 - 2, y - 5, w + 4, 11);
+      ctx.fillRect(x - w/2 - 2, y + yOff - 5, w + 4, 11);
       ctx.fillStyle = color;
-      ctx.fillText(text, x, y + 4);
+      ctx.fillText(text, x, y + yOff + 4);
     };
 
-    if(!isNegligible(val0Max, mag)) drawLabel(fmtSmart(val0Max), offsetLineMax[0].x, offsetLineMax[0].y - 6);
-    if(!isNegligible(val0Min, mag) && Math.abs(val0Max - val0Min) > 1e-4) drawLabel(fmtSmart(val0Min), offsetLineMin[0].x, offsetLineMin[0].y + 8);
+    if(!isNegligible(val0Max, mag)) drawLabel(fmtSmart(val0Max), offsetLineMax[0].x, offsetLineMax[0].y, offsetLineMax[0].y < baseline[0].y);
+    if(!isNegligible(val0Min, mag) && Math.abs(val0Max - val0Min) > 1e-4) drawLabel(fmtSmart(val0Min), offsetLineMin[0].x, offsetLineMin[0].y, offsetLineMin[0].y < baseline[0].y);
 
-    if(!isNegligible(valEMax, mag)) drawLabel(fmtSmart(valEMax), offsetLineMax[offsetLineMax.length-1].x, offsetLineMax[offsetLineMax.length-1].y - 6);
-    if(!isNegligible(valEMin, mag) && Math.abs(valEMax - valEMin) > 1e-4) drawLabel(fmtSmart(valEMin), offsetLineMin[offsetLineMin.length-1].x, offsetLineMin[offsetLineMin.length-1].y + 8);
+    if(!isNegligible(valEMax, mag)) drawLabel(fmtSmart(valEMax), offsetLineMax[offsetLineMax.length-1].x, offsetLineMax[offsetLineMax.length-1].y, offsetLineMax[offsetLineMax.length-1].y < baseline[baseline.length-1].y);
+    if(!isNegligible(valEMin, mag) && Math.abs(valEMax - valEMin) > 1e-4) drawLabel(fmtSmart(valEMin), offsetLineMin[offsetLineMin.length-1].x, offsetLineMin[offsetLineMin.length-1].y, offsetLineMin[offsetLineMin.length-1].y < baseline[baseline.length-1].y);
 
     let peakIdx = -1, peakDiff = 0;
     for(let k = 1; k < env.pts.length - 1; k++){
@@ -3894,7 +4239,7 @@ function drawEnvelopeDiagram(type){
     if(peakIdx > 0 && !isNegligible(peakDiff, mag)){
       const ptPeak = env.pts[peakIdx];
       const vPeak = type==='M'? ptPeak.M_max : type==='T'? ptPeak.V_max : type==='N'? ptPeak.N_max : Math.max(ptPeak.sigTop_max, ptPeak.sigBot_max);
-      drawLabel(fmtSmart(vPeak), offsetLineMax[peakIdx].x, offsetLineMax[peakIdx].y - 6);
+      drawLabel(fmtSmart(vPeak), offsetLineMax[peakIdx].x, offsetLineMax[peakIdx].y, offsetLineMax[peakIdx].y < baseline[peakIdx].y);
     }
   });
 }
@@ -3902,6 +4247,10 @@ function drawEnvelopeDiagram(type){
 function setEnvelopeReactionMode(mode){
   envelopeReactionMode = mode;
   showReactions = (mode !== 'off');
+  if(lastResultViewsPerType.envelope){
+    lastResultViewsPerType.envelope.reactionMode = mode;
+    lastResultViewsPerType.envelope.showReactions = showReactions;
+  }
   renderSidebar();
   render();
 }
@@ -4151,6 +4500,7 @@ function render(){
   if(!hideLS && !isEnvelope) drawLoads();
   drawNodes();
   if(showIdLabels) drawIdLabels();
+  if(showDimensionLines) drawModelDimensionLines();
   if(showReactions && !isInfluence) drawReactions();
   drawILSectionMarker();
   if(probe.elId!=null && (diagrams || (isInfluence && ilDiagrams) || (isEnvelope && solved && solved.envelopeData))) drawProbeMarker();
@@ -4259,6 +4609,171 @@ function drawSingleDimension(el){
   ctx.restore();
 }
 function drawElementDimensions(elsArr){ elsArr.forEach(drawSingleDimension); }
+function drawModelDimensionLines(){
+  if(!nodes || nodes.length < 2) return;
+
+  const xsRaw = Array.from(new Set(nodes.map(n => Math.round(n.x * 1000) / 1000))).sort((a,b) => a - b);
+  const xs = [];
+  xsRaw.forEach(x => {
+    if(xs.length === 0 || x - xs[xs.length - 1] > 1e-4){
+      xs.push(x);
+    }
+  });
+
+  const ysRaw = Array.from(new Set(nodes.map(n => Math.round(n.y * 1000) / 1000))).sort((a,b) => a - b);
+  const ys = [];
+  ysRaw.forEach(y => {
+    if(ys.length === 0 || y - ys[ys.length - 1] > 1e-4){
+      ys.push(y);
+    }
+  });
+
+  if(xs.length < 2 && ys.length < 2) return;
+
+  ctx.save();
+  ctx.strokeStyle = DIMCOLOR;
+  ctx.fillStyle = DIMCOLOR;
+
+  // --- HORIZONTAL DIMENSION LINES (below model) ---
+  if(xs.length >= 2){
+    const minY = Math.min(...nodes.map(n => n.y));
+    const pMinY = toScreen(0, minY).y;
+    const horizOffsetPx = 42;
+    const dimY = pMinY + horizOffsetPx;
+
+    const drawHorizSeg = (x1, x2, levelY) => {
+      const L = x2 - x1;
+      if(L < 1e-4) return;
+      const paX = toScreen(x1, 0).x;
+      const pbX = toScreen(x2, 0).x;
+
+      const nodesAtX1 = nodes.filter(n => Math.abs(n.x - x1) < 1e-4);
+      const nodesAtX2 = nodes.filter(n => Math.abs(n.x - x2) < 1e-4);
+      const startY1 = nodesAtX1.length ? Math.min(...nodesAtX1.map(n => n.y)) : minY;
+      const startY2 = nodesAtX2.length ? Math.min(...nodesAtX2.map(n => n.y)) : minY;
+
+      const pStartY1 = toScreen(0, startY1).y;
+      const pStartY2 = toScreen(0, startY2).y;
+
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      ctx.moveTo(paX, pStartY1 + 6);
+      ctx.lineTo(paX, levelY + 5);
+      ctx.moveTo(pbX, pStartY2 + 6);
+      ctx.lineTo(pbX, levelY + 5);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(paX, levelY);
+      ctx.lineTo(pbX, levelY);
+      ctx.stroke();
+
+      const tick = 4;
+      ctx.beginPath();
+      ctx.moveTo(paX - tick, levelY - tick);
+      ctx.lineTo(paX + tick, levelY + tick);
+      ctx.moveTo(pbX - tick, levelY - tick);
+      ctx.lineTo(pbX + tick, levelY + tick);
+      ctx.stroke();
+
+      const midx = (paX + pbX) / 2;
+      const label = fmt(L, 2) + ' m';
+      ctx.font = '11px ' + FONT_MONO;
+      const w = ctx.measureText(label).width;
+      const padH = 5, h = 15;
+      ctx.fillStyle = DIMCOLOR;
+      roundRect(midx - w/2 - padH, levelY - h/2, w + 2*padH, h, 4);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, midx, levelY);
+      ctx.fillStyle = DIMCOLOR;
+    };
+
+    for(let i = 0; i < xs.length - 1; i++){
+      drawHorizSeg(xs[i], xs[i+1], dimY);
+    }
+
+    if(xs.length > 2){
+      drawHorizSeg(xs[0], xs[xs.length - 1], dimY + 35);
+    }
+  }
+
+  // --- VERTICAL DIMENSION LINES (to the right of model) ---
+  if(ys.length >= 2){
+    const maxX = Math.max(...nodes.map(n => n.x));
+    const pMaxX = toScreen(maxX, 0).x;
+    const vertOffsetPx = 45;
+    const dimX = pMaxX + vertOffsetPx;
+
+    const drawVertSeg = (y1, y2, levelX) => {
+      const H = y2 - y1;
+      if(H < 1e-4) return;
+      const paY = toScreen(0, y1).y;
+      const pbY = toScreen(0, y2).y;
+
+      const nodesAtY1 = nodes.filter(n => Math.abs(n.y - y1) < 1e-4);
+      const nodesAtY2 = nodes.filter(n => Math.abs(n.y - y2) < 1e-4);
+      const startX1 = nodesAtY1.length ? Math.max(...nodesAtY1.map(n => n.x)) : maxX;
+      const startX2 = nodesAtY2.length ? Math.max(...nodesAtY2.map(n => n.x)) : maxX;
+
+      const pStartX1 = toScreen(startX1, 0).x;
+      const pStartX2 = toScreen(startX2, 0).x;
+
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      ctx.moveTo(pStartX1 + 6, paY);
+      ctx.lineTo(levelX + 5, paY);
+      ctx.moveTo(pStartX2 + 6, pbY);
+      ctx.lineTo(levelX + 5, pbY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(levelX, paY);
+      ctx.lineTo(levelX, pbY);
+      ctx.stroke();
+
+      const tick = 4;
+      ctx.beginPath();
+      ctx.moveTo(levelX - tick, paY + tick);
+      ctx.lineTo(levelX + tick, paY - tick);
+      ctx.moveTo(levelX - tick, pbY + tick);
+      ctx.lineTo(levelX + tick, pbY - tick);
+      ctx.stroke();
+
+      const midy = (paY + pbY) / 2;
+      const label = fmt(H, 2) + ' m';
+      ctx.font = '11px ' + FONT_MONO;
+      const w = ctx.measureText(label).width;
+      const padH = 5, h = 15;
+      ctx.fillStyle = DIMCOLOR;
+      roundRect(levelX - w/2 - padH, midy - h/2, w + 2*padH, h, 4);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, levelX, midy);
+      ctx.fillStyle = DIMCOLOR;
+    };
+
+    for(let j = 0; j < ys.length - 1; j++){
+      drawVertSeg(ys[j], ys[j+1], dimX);
+    }
+
+    if(ys.length > 2){
+      drawVertSeg(ys[0], ys[ys.length - 1], dimX + 50);
+    }
+  }
+
+  ctx.restore();
+}
 function drawTransientOverlays(){
   if(dragNode!=null){
     drawElementDimensions(connectedElements(dragNode));
@@ -4309,8 +4824,8 @@ function drawScaleBar(){
   ctx.stroke();
   
   ctx.fillStyle = getCss('--ink'); 
-  ctx.textAlign = 'left';
-  ctx.fillText(label, x0, y - 8);
+  ctx.textAlign = 'center';
+  ctx.fillText(label, (x0 + x1) / 2, y - 8);
 }
 
 /* =========================================================================
@@ -4541,6 +5056,15 @@ function openOptionsModal(){
           'Czysto wizualne — chowa strzałki sił i symbole podpór, gdy widoczny jest przynajmniej jeden wykres wyników (odkształcenie, N, T, M, σ lub reakcje).')}
         ${optionRowToggle('gridOpt','Pokaż siatkę tła', showBackgroundGrid, '')}
         ${optionRowToggle('labelsOpt','Pokaż numery węzłów i prętów', showIdLabels, '')}
+        ${optionRowToggle('dimLinesOpt','Linie wymiarowe', showDimensionLines, 'Rysuje poziome linie wymiarowe pod modelem oraz pionowe linie wymiarowe z prawej strony modelu między węzłami.')}
+        <div style="margin-top:14px;margin-bottom:14px;">
+          <div class="row" style="margin-bottom:0;">
+            <span style="font-size:12.5px;font-weight:600;flex:1;min-width:0;">Krok dociągania węzłów do siatki</span>
+            <input type="number" id="snapSizeOpt" step="0.05" min="0.01" value="${snapSize}" style="width:76px;flex:0 0 auto;text-align:left;">
+            <span class="unit" style="width:auto;flex:0 0 auto;padding-left:2px;">m</span>
+          </div>
+          <div class="muted" style="margin-top:4px;">Określa krok (w metrach), do jakiego będą dociągane węzły przy włączonym przycisku „Przyciągaj”.</div>
+        </div>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -4553,6 +5077,15 @@ function openOptionsModal(){
   document.getElementById('hideLSOpt').addEventListener('change',(e)=>{ hideLoadsSupportsInResults=e.target.checked; saveAppOptionsToStorage(); render(); });
   document.getElementById('gridOpt').addEventListener('change',(e)=>{ showBackgroundGrid=e.target.checked; saveAppOptionsToStorage(); render(); });
   document.getElementById('labelsOpt').addEventListener('change',(e)=>{ showIdLabels=e.target.checked; saveAppOptionsToStorage(); render(); });
+  document.getElementById('dimLinesOpt').addEventListener('change',(e)=>{ showDimensionLines=e.target.checked; saveAppOptionsToStorage(); render(); });
+  document.getElementById('snapSizeOpt').addEventListener('change',(e)=>{
+    const val = parseFloat(e.target.value);
+    if(!isNaN(val) && val > 0){
+      snapSize = val;
+      saveAppOptionsToStorage();
+      buildToolbar();
+    }
+  });
 }
 function closeOptionsModal(){ const o=document.getElementById('optionsOverlay'); if(o) o.remove(); }
 
@@ -5042,8 +5575,21 @@ function updateAnalysisParam(key, val){
 function panelAnalysisType(){
   const type = (analysisSettings && analysisSettings.type) || 'linear_static';
   const params = (analysisSettings && analysisSettings.params) || {bucklingModes:4, modalModes:4, harmonicFreq:5.0, includeElementMass:true};
+  const analysisNames = {
+    'linear_static': 'Statyka liniowa',
+    'stability': 'Stateczność',
+    'modal': 'Drgania własne',
+    'harmonic': 'Drgania wymuszone',
+    'influence': 'Linie wpływu',
+    'envelope': 'Obwiednia sił'
+  };
+  const currentTypeName = analysisNames[type] || 'Statyka liniowa';
+
   return `<div class="panel">
-    <h3 class="collapsible-head" onclick="toggleAnalysisCollapse()">Rodzaj analizy <span class="subtle-icon">${analysisCollapsed?'▸':'▾'}</span></h3>
+    <h3 class="collapsible-head" onclick="toggleAnalysisCollapse()" style="cursor:pointer;user-select:none;">
+      <span>Rodzaj analizy ${analysisCollapsed ? `<span style="font-weight:400;font-size:11px;color:var(--text-dim);text-transform:none;letter-spacing:0;margin-left:6px;">— ${currentTypeName}</span>` : ''}</span>
+      <span class="subtle-icon">${analysisCollapsed?'▸':'▾'}</span>
+    </h3>
     <div id="analysisBody" style="${analysisCollapsed?'display:none;':''}">
       <div class="card">
         <div class="row">
@@ -5092,8 +5638,11 @@ function panelAnalysisType(){
           <div class="checkline" style="margin-top:8px;">
             <input type="checkbox" id="harmonicIncludeElemMass" ${(params.includeElementMass!==false)?'checked':''} onchange="updateAnalysisParam('includeElementMass', this.checked)"> Uwzględnij masę prętów
           </div>
+          <div class="checkline" style="margin-top:6px;">
+            <input type="checkbox" id="harmonicIncludeGravity" ${(params.includeGravity===true)?'checked':''} onchange="updateAnalysisParam('includeGravity', this.checked)"> Uwzględnij grawitację (ciężar prętów + mas ↓)
+          </div>
           <div class="muted" style="margin-top:6px;line-height:1.4;">
-            Drgania harmoniczne bez tłumienia: obciążenia z modelu stanowią amplitudę wymuszenia F(t) = F₀ · sin(2πf · t). Analiza wyznacza rzeczywiste amplitudy przemieszczeń, sił wewnętrznych i naprężeń.
+            Drgania wymuszone: oblicza 4 skrajne stany kombinacji sił statycznych, bezwładności i grawitacji (±F_stat ± F_dyn + G). Grawitacja uwzględnia masy skupione m_y oraz masę prętów.
           </div>
         ` : ''}
         ${type==='influence' ? panelInfluenceSetupHtml(params) : ''}
@@ -5511,6 +6060,8 @@ function splitElement(elId,points){
     ne.sectionId=el.sectionId; ne.materialId=el.materialId;
     ne.hingeStart = (i===0)? el.hingeStart : false;
     ne.hingeEnd = (i===allT.length-2)? el.hingeEnd : false;
+    if(el.hingeStart && el.momentHingeStart && (i===0)) ne.momentHingeStart = el.momentHingeStart;
+    if(el.hingeEnd && el.momentHingeEnd && (i===allT.length-2)) ne.momentHingeEnd = el.momentHingeEnd;
     if(el.thermal) ne.thermal={dTtop:el.thermal.dTtop, dTbottom:el.thermal.dTbottom};
     if(el.q){
       const qAt=(t)=>el.q.qStart+(el.q.qEnd-el.q.qStart)*t;
@@ -5996,6 +6547,10 @@ function envelopeReactionsTableHtml(){
 }
 
 function panelHarmonicResults(){
+  const activeComb = solved.combKey || 'stat_plus_dyn';
+  const curCfg = HARMONIC_COMBS[activeComb] || HARMONIC_COMBS['stat_plus_dyn'];
+  const hasG = !!solved.includeGravity;
+
   let html = `<div class="panel">
     <h3>Drgania wymuszone <span class="tag">Harmoniczna</span></h3>
     ${solveWarning ? `<div class="warn">${solveWarning}</div>` : ''}
@@ -6012,28 +6567,61 @@ function panelHarmonicResults(){
         <span style="color:var(--text-dim);font-size:11px;">Okres wymuszenia T:</span>
         <span style="font-family:var(--mono);font-weight:600;font-size:12px;color:var(--text);">${solved.freqHz > 1e-6 ? fmtSmart(1.0/solved.freqHz, 4) + ' s' : '∞'}</span>
       </div>
-      <div class="muted" style="margin-top:8px;line-height:1.45;">
-        Amplitudy stanu ustalonego dla wymuszenia harmonicznego F(t) = F₀ · sin(Ωt).
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed var(--surface-border-soft);">
+        <span style="color:var(--text-dim);font-size:11px;">Wpływ grawitacji:</span>
+        <span class="tag" style="font-size:10px;${hasG ? 'background:var(--ok-bg);color:var(--ok);font-weight:600;' : ''}">${hasG ? 'AKTYWNY (g = 9.81 m/s² ↓)' : 'Wyłączony'}</span>
       </div>
     </div>
   </div>
 
   <div class="panel">
-    <h3>Amplitudy reakcji <span class="tag">R_dyn</span></h3>
+    <h3>Stan skrajny <span class="tag">Kombinacja</span></h3>
+    <div class="muted" style="margin-bottom:8px;line-height:1.4;">
+      Wybierz stan superpozycji siły statycznej, bezwładności i grawitacji:
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px;">
+      <button class="mini ${activeComb==='stat_plus_dyn'?'on':''}" style="padding:6px 4px;font-size:11px;line-height:1.3;" onclick="setHarmonicCombination('stat_plus_dyn')" title="Siła statyczna + siły bezwładności + grawitacja">
+        <strong>Stan 1</strong><br>+F_stat + F_bezwł ${hasG?'+ G':''}
+      </button>
+      <button class="mini ${activeComb==='stat_minus_dyn'?'on':''}" style="padding:6px 4px;font-size:11px;line-height:1.3;" onclick="setHarmonicCombination('stat_minus_dyn')" title="Siła statyczna − siły bezwładności + grawitacja">
+        <strong>Stan 2</strong><br>+F_stat − F_bezwł ${hasG?'+ G':''}
+      </button>
+      <button class="mini ${activeComb==='neg_stat_plus_dyn'?'on':''}" style="padding:6px 4px;font-size:11px;line-height:1.3;" onclick="setHarmonicCombination('neg_stat_plus_dyn')" title="−Siła statyczna + siły bezwładności + grawitacja">
+        <strong>Stan 3</strong><br>−F_stat + F_bezwł ${hasG?'+ G':''}
+      </button>
+      <button class="mini ${activeComb==='neg_stat_minus_dyn'?'on':''}" style="padding:6px 4px;font-size:11px;line-height:1.3;" onclick="setHarmonicCombination('neg_stat_minus_dyn')" title="−Siła statyczna − siły bezwładności + grawitacja">
+        <strong>Stan 4</strong><br>−F_stat − F_bezwł ${hasG?'+ G':''}
+      </button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px;">
+      <button class="mini ${activeComb==='dyn_only'?'on':''}" style="padding:5px 4px;font-size:10.5px;" onclick="setHarmonicCombination('dyn_only')" title="Tylko amplituda samych sił bezwładności (odjęta składowa statyczna)">
+        Tylko F_bezwł (dynamika)
+      </button>
+      <button class="mini ${activeComb==='stat_only'?'on':''}" style="padding:5px 4px;font-size:10.5px;" onclick="setHarmonicCombination('stat_only')" title="Tylko odpowiedź na obciążenie statyczne bez drgań">
+        Tylko F_stat (statyka)
+      </button>
+    </div>
+    <div class="muted" style="margin-top:6px;font-size:11px;line-height:1.35;">
+      Wybrany stan: <strong style="color:var(--text);">${curCfg.name}</strong><br>${curCfg.desc}.
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Reakcje podporowe <span class="tag">${curCfg.shortName}${hasG&&curCfg.sGrav?'+G':''}</span></h3>
     ${reactionsTableHtml()}
   </div>
 
   <div class="panel">
     <h3>Widok wyników</h3>
-    ${diagToggleRow('Reakcje dynamiczne','showReactions',showReactions,'--react-color')}
-    ${diagToggleRow('Amplituda ugięcia (deformacja)','showDeform',showDeform,'--def-color')}
+    ${diagToggleRow('Reakcje podporowe','showReactions',showReactions,'--react-color')}
+    ${diagToggleRow('Linia ugięcia (deformacja)','showDeform',showDeform,'--def-color')}
     ${showDeform ? deformSliderHtml() : ''}
     <hr class="sep" style="margin:8px 0;">
-    <div style="font-weight:600;font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em;">Amplitudy sił i naprężeń</div>
-    ${diagToggleRow('Siła osiowa N_dyn','showN',showN,'--n-color')}
-    ${diagToggleRow('Siła tnąca T_dyn','showT',showT,'--t-color')}
-    ${diagToggleRow('Moment zginający M_dyn','showM',showM,'--m-color')}
-    ${diagToggleRow('Naprężenia σ_dyn','showStress',showStress,'--s-color')}
+    <div style="font-weight:600;font-size:11px;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.04em;">Wykresy sił i naprężeń</div>
+    ${diagToggleRow('Siła osiowa N','showN',showN,'--n-color')}
+    ${diagToggleRow('Siła tnąca T','showT',showT,'--t-color')}
+    ${diagToggleRow('Moment zginający M','showM',showM,'--m-color')}
+    ${diagToggleRow('Naprężenia σ (góra/dół)','showStress',showStress,'--s-color')}
     ${(showN||showT||showM||showStress) ? diagramSliderHtml() : ''}
   </div>
 
@@ -6105,10 +6693,17 @@ function panelModalResults(){
         <span class="muted">${modeIdx+1} z ${totalModes}</span>
       </div>
       
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
         <button class="mini" onclick="prevModalMode()" title="Poprzednia forma (Strzałka w lewo)" ${totalModes<=1?'disabled':''}>◀ Poprzednia</button>
         <select style="flex:1;min-width:0;text-align:center;" onchange="setModalMode(parseInt(this.value))">${modeOptions}</select>
         <button class="mini" onclick="nextModalMode()" title="Następna forma (Strzałka w prawo)" ${totalModes<=1?'disabled':''}>Następna ▶</button>
+      </div>
+
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        <button class="mini" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:6px 8px;font-size:11.5px;background:var(--surface);border:1px solid var(--surface-border-soft);" onclick="invertModalSign()" title="Odwróć zwrot postaci drgań (wyświetl przeciwfazę / przeciwny stan skrajny drgań)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l4-4m-4 4l-4-4"/></svg>
+          Odwróć wykresy <span class="tag" style="margin-left:4px;padding:1px 5px;font-size:10px;">${(solved.modalSign===-1)?'Faza −180° (−)':'Faza 0° (+)'}</span>
+        </button>
       </div>
 
       <div style="background:var(--surface);border:1px solid var(--surface-border-soft);border-radius:6px;padding:10px;margin-bottom:8px;">
@@ -6134,7 +6729,7 @@ function panelModalResults(){
       </div>
 
       <div class="muted" style="line-height:1.45;">
-        Znormalizowana postać własna drgań (max deformacja = 1.0). Wykresy poniżej przedstawiają odpowiadające jej modalne siły wewnętrzne i naprężenia sprężyste.
+        Znormalizowana postać własna drgań (max deformacja = 1.0). Wykresy poniżej przedstawiają odpowiadające jej modalne siły wewnętrzne i naprężenia sprężyste w wybranym stanie skrajnym.
       </div>
     </div>
   </div>
@@ -6150,6 +6745,13 @@ function panelModalResults(){
     ${diagToggleRow('Moment zginający M_mod','showM',showM,'--m-color')}
     ${diagToggleRow('Naprężenia σ_mod','showStress',showStress,'--s-color')}
     ${(showN||showT||showM||showStress) ? diagramSliderHtml() : ''}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px dashed var(--surface-border-soft);">
+      <span style="color:var(--text-dim);font-size:11.5px;">Zwrot postaci drgań:</span>
+      <button class="mini" style="display:flex;align-items:center;gap:5px;font-size:11px;" onclick="invertModalSign()" title="Odwróć znak wszystkich wykresów modalnych">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l4-4m-4 4l-4-4"/></svg>
+        Odwróć (${(solved.modalSign===-1)?'Stan: −':'Stan: +'})
+      </button>
+    </div>
   </div>
 
   ${probePanelHtml()}
@@ -6189,10 +6791,17 @@ function panelStabilityResults(){
         <span class="muted">${modeIdx+1} z ${totalModes}</span>
       </div>
       
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:10px;">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
         <button class="mini" onclick="prevBucklingMode()" title="Poprzednia forma (Strzałka w lewo)" ${totalModes<=1?'disabled':''}>◀ Poprzednia</button>
         <select style="flex:1;min-width:0;text-align:center;" onchange="setBucklingMode(parseInt(this.value))">${modeOptions}</select>
         <button class="mini" onclick="nextBucklingMode()" title="Następna forma (Strzałka w prawo)" ${totalModes<=1?'disabled':''}>Następna ▶</button>
+      </div>
+
+      <div style="display:flex;gap:6px;margin-bottom:10px;">
+        <button class="mini" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:6px 8px;font-size:11.5px;background:var(--surface);border:1px solid var(--surface-border-soft);" onclick="invertStabilitySign()" title="Odwróć zwrot postaci wyboczenia (+ / −)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l4-4m-4 4l-4-4"/></svg>
+          Odwróć postać <span class="tag" style="margin-left:4px;padding:1px 5px;font-size:10px;">${(solved.modalSign===-1)?'Stan: −':'Stan: +'}</span>
+        </button>
       </div>
 
       <div style="background:var(--surface);border:1px solid var(--surface-border-soft);border-radius:6px;padding:10px;margin-bottom:8px;">
@@ -6224,6 +6833,13 @@ function panelStabilityResults(){
     ${diagToggleRow('Moment zginający M_cr','showM',showM,'--m-color')}
     ${diagToggleRow('Naprężenia σ_cr','showStress',showStress,'--s-color')}
     ${(showN||showT||showM||showStress) ? diagramSliderHtml() : ''}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;padding-top:8px;border-top:1px dashed var(--surface-border-soft);">
+      <span style="color:var(--text-dim);font-size:11.5px;">Zwrot postaci:</span>
+      <button class="mini" style="display:flex;align-items:center;gap:5px;font-size:11px;" onclick="invertStabilitySign()" title="Odwróć znak postaci wyboczenia">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l4-4m-4 4l-4-4"/></svg>
+        Odwróć (${(solved.modalSign===-1)?'Stan: −':'Stan: +'})
+      </button>
+    </div>
   </div>
 
   ${probePanelHtml()}
@@ -6269,7 +6885,14 @@ function toggleDiagram(name,val){
   else if(name==='showM') showM=val;
   else if(name==='showStress') showStress=val;
   else if(name==='showReactions') showReactions=val;
+
   lastResultView[name]=val;
+
+  const anType = (solved && solved.type) || (analysisSettings && analysisSettings.type) || 'linear_static';
+  if(lastResultViewsPerType[anType]){
+    lastResultViewsPerType[anType][name] = val;
+  }
+
   renderSidebar(); render();
 }
 function setDeformMult(v){ deformMult=parseFloat(v); const l=document.getElementById('deformMultLbl'); if(l) l.textContent=deformMult.toFixed(1)+'×'; render(); }
@@ -6390,7 +7013,21 @@ function probeReadoutHtml(){
     const mode = solved.modes[solved.currentMode || 0];
     const staticEdRes = solved.staticSolved.results[idx];
     const staticPr = FEM.pointResults(staticEdRes, x);
-    const pr = mode.evalPoint(idx, x, staticPr);
+    const rawPr = mode.evalPoint(idx, x, staticPr);
+    const sign = (solved.modalSign != null) ? solved.modalSign : 1;
+    const pr = {
+      ...rawPr,
+      N: rawPr.N * sign,
+      V: rawPr.V * sign,
+      M: rawPr.M * sign,
+      u_local: rawPr.u_local * sign,
+      v_local: rawPr.v_local * sign,
+      theta: rawPr.theta * sign,
+      Ux_global: rawPr.Ux_global * sign,
+      Uy_global: rawPr.Uy_global * sign,
+      sigTop: rawPr.sigTop * sign,
+      sigBot: rawPr.sigBot * sign
+    };
     return `<div class="probeval">
       <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
       <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
@@ -6411,7 +7048,21 @@ function probeReadoutHtml(){
 
   if(solved.type === 'modal'){
     const mode = solved.modes[solved.currentMode || 0];
-    const pr = mode.evalPoint(idx, x);
+    const rawPr = mode.evalPoint(idx, x);
+    const sign = (solved.modalSign != null) ? solved.modalSign : 1;
+    const pr = {
+      ...rawPr,
+      N: rawPr.N * sign,
+      V: rawPr.V * sign,
+      M: rawPr.M * sign,
+      u_local: rawPr.u_local * sign,
+      v_local: rawPr.v_local * sign,
+      theta: rawPr.theta * sign,
+      Ux_global: rawPr.Ux_global * sign,
+      Uy_global: rawPr.Uy_global * sign,
+      sigTop: rawPr.sigTop * sign,
+      sigBot: rawPr.sigBot * sign
+    };
     return `<div class="probeval">
       <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
       <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
@@ -6427,6 +7078,58 @@ function probeReadoutHtml(){
       <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
       <div><span class="k">Naprężenie σ_mod góra</span><span class="v">${fmt(pr.sigTop/1000,2)} MPa</span></div>
       <div><span class="k">Naprężenie σ_mod dół</span><span class="v">${fmt(pr.sigBot/1000,2)} MPa</span></div>
+    </div>`;
+  }
+
+  if(solved.type === 'harmonic'){
+    const staticEdRes = solved.staticSol ? solved.staticSol.results[idx] : null;
+    const dynEdRes = solved.dynSol ? solved.dynSol.results[idx] : null;
+    const gravEdRes = solved.gravSol ? solved.gravSol.results[idx] : null;
+
+    const prStat = staticEdRes ? FEM.pointResults(staticEdRes, x) : { N:0, V:0, M:0, u_local:0, v_local:0, theta:0, Ux_global:0, Uy_global:0, sigTop:0, sigBot:0 };
+    const prHarm = dynEdRes ? FEM.pointResults(dynEdRes, x) : { N:0, V:0, M:0, u_local:0, v_local:0, theta:0, Ux_global:0, Uy_global:0, sigTop:0, sigBot:0 };
+    const prGrav = gravEdRes ? FEM.pointResults(gravEdRes, x) : null;
+
+    const cfg = HARMONIC_COMBS[solved.combKey || 'stat_plus_dyn'] || HARMONIC_COMBS['stat_plus_dyn'];
+    const sStat = cfg.sStat, sInertia = cfg.sInertia, sGrav = cfg.sGrav;
+
+    function combVal(key){
+      const vStat = prStat[key] || 0;
+      const vHarm = prHarm[key] || 0;
+      const vInert = vHarm - vStat;
+      const vGrav = (sGrav && prGrav) ? (prGrav[key] || 0) : 0;
+      return sStat * vStat + sInertia * vInert + vGrav;
+    }
+
+    const pr = {
+      x,
+      N: combVal('N'),
+      V: combVal('V'),
+      M: combVal('M'),
+      u_local: combVal('u_local'),
+      v_local: combVal('v_local'),
+      theta: combVal('theta'),
+      Ux_global: combVal('Ux_global'),
+      Uy_global: combVal('Uy_global'),
+      sigTop: combVal('sigTop'),
+      sigBot: combVal('sigBot')
+    };
+
+    return `<div class="probeval">
+      <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
+      <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
+      <div><span class="k">Ux (${cfg.shortName})</span><span class="v">${fmt(pr.Ux_global*1000,2)} mm</span></div>
+      <div><span class="k">Uy (${cfg.shortName})</span><span class="v">${fmt(pr.Uy_global*1000,2)} mm</span></div>
+      <div><span class="k">u (lokalne, osiowe)</span><span class="v">${fmt(pr.u_local*1000,2)} mm</span></div>
+      <div><span class="k">v (lokalne, poprzeczne)</span><span class="v">${fmt(pr.v_local*1000,2)} mm</span></div>
+      <div><span class="k">Obrót θ</span><span class="v">${fmt(pr.theta*1000,3)} mrad</span></div>
+      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
+      <div><span class="k">Siła osiowa N</span><span class="v">${fmt(pr.N,3)} kN</span></div>
+      <div><span class="k">Siła tnąca T</span><span class="v">${fmt(pr.V,3)} kN</span></div>
+      <div><span class="k">Moment zginający M</span><span class="v">${fmt(pr.M,3)} kNm</span></div>
+      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
+      <div><span class="k">Naprężenie σ góra</span><span class="v">${fmt(pr.sigTop/1000,2)} MPa</span></div>
+      <div><span class="k">Naprężenie σ dół</span><span class="v">${fmt(pr.sigBot/1000,2)} MPa</span></div>
     </div>`;
   }
 
