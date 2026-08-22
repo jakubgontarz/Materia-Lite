@@ -75,13 +75,14 @@
   #toolbar{
     background:linear-gradient(180deg,var(--toolbar-bg),var(--toolbar-bg2));
     color:var(--toolbar-fg);
-    display:flex;align-items:center;gap:4px;
-    padding:6px 10px;flex-wrap:wrap;
+    display:flow-root;
+    padding:6px 10px 2px 10px;
     border-bottom:1px solid #0d141d;
     z-index:20;
   }
-  .tb-group{display:flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid #364353;}
+  .tb-group{display:inline-flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid #364353;vertical-align:top;margin-bottom:4px;}
   .tb-group:last-child{border-right:none;}
+  .tb-group-run{float:right;border-right:none !important;padding:0 0 0 6px !important;margin-bottom:4px;}
   .tb-btn{
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
     background:transparent;border:1px solid transparent;color:var(--toolbar-fg);
@@ -2250,7 +2251,7 @@ let analysisSettings = {
   }
 };
 
-let mode='select';           // select | addBar | delete
+let mode='select';           // select | addBar
 let selection={nodeIds:[], elemIds:[]};   // multi-selection: arrays of currently selected node/element ids
 let barStart=null;
 let dragNode=null;           // id of node being dragged
@@ -4594,9 +4595,9 @@ function drawSegmentDimensionPoints(pa, pb, lengthMeters){
   // linia wymiarowa
   ctx.lineWidth=1.4;
   ctx.beginPath(); ctx.moveTo(oa.x,oa.y); ctx.lineTo(ob.x,ob.y); ctx.stroke();
-  // kreski końcowe (ukośne kreski 45 deg z obu stron, tak jak w liniach wymiarowych modelu)
+  // kreski końcowe (ukośne kreski 45 deg z obu stron, zgodnie z normą inżynierską)
   const tick=4;
-  const tx = (ux + nx) * tick, ty = (uy + ny) * tick;
+  const tx = (ux - nx) * tick, ty = (uy - ny) * tick;
   ctx.beginPath(); ctx.moveTo(oa.x - tx, oa.y - ty); ctx.lineTo(oa.x + tx, oa.y + ty); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(ob.x - tx, ob.y - ty); ctx.lineTo(ob.x + tx, ob.y + ty); ctx.stroke();
   // etykieta z długością
@@ -4682,10 +4683,10 @@ function drawModelDimensionLines(){
 
       const tick = 4;
       ctx.beginPath();
-      ctx.moveTo(paX - tick, levelY - tick);
-      ctx.lineTo(paX + tick, levelY + tick);
-      ctx.moveTo(pbX - tick, levelY - tick);
-      ctx.lineTo(pbX + tick, levelY + tick);
+      ctx.moveTo(paX - tick, levelY + tick);
+      ctx.lineTo(paX + tick, levelY - tick);
+      ctx.moveTo(pbX - tick, levelY + tick);
+      ctx.lineTo(pbX + tick, levelY - tick);
       ctx.stroke();
 
       const midx = (paX + pbX) / 2;
@@ -4751,10 +4752,10 @@ function drawModelDimensionLines(){
 
       const tick = 4;
       ctx.beginPath();
-      ctx.moveTo(levelX - tick, paY + tick);
-      ctx.lineTo(levelX + tick, paY - tick);
-      ctx.moveTo(levelX - tick, pbY + tick);
-      ctx.lineTo(levelX + tick, pbY - tick);
+      ctx.moveTo(levelX - tick, paY - tick);
+      ctx.lineTo(levelX + tick, paY + tick);
+      ctx.moveTo(levelX - tick, pbY - tick);
+      ctx.lineTo(levelX + tick, pbY + tick);
       ctx.stroke();
 
       const midy = (paY + pbY) / 2;
@@ -4978,19 +4979,14 @@ function buildToolbar(){
   const showSnapToggle = (mode==='addBar' || mode==='select');
   const showNewNodesToggle = (mode==='addBar');
   const showBoxSelectToggle = (mode==='select');
+  const hasToggles = showSnapToggle || showNewNodesToggle || showBoxSelectToggle;
   const isSolved = !!solved;
   tb.innerHTML = `
-    <div class="tb-group">
-      <button class="tb-btn" data-mode="select" title="Zaznacz / przesuń (V)">${ICONS.select}<span>Zaznacz</span></button>
-      <button class="tb-btn" data-mode="addBar" title="Rysuj pręt / węzeł (R / B)">${ICONS.bar}<span>Rysuj</span></button>
-      <button class="tb-btn" data-mode="delete" title="Usuń (Del)">${ICONS.del}<span>Usuń</span></button>
+    <!-- Grupa Oblicz: float: right zakotwicza na samej górze z prawej strony 1. linii -->
+    <div class="tb-group tb-group-run">
+      <button class="tb-btn primary" id="btnRun" title="${isSolved?'Ukryj wyniki i wróć do edycji modelu (Enter)':'Uruchom obliczenia (Enter)'}">${isSolved ? ICONS.back : ICONS.run}<span>${isSolved ? 'WRÓĆ' : 'OBLICZ'}</span></button>
     </div>
-    <div class="tb-group">
-      <span class="tb-label">Przekrój</span>
-      <select id="defSectionSel" class="tb-select"></select>
-      <span class="tb-label">Materiał</span>
-      <select id="defMaterialSel" class="tb-select"></select>
-    </div>
+    <!-- Grupa 1: Nowy, Wczytaj, Zapisz, Cofnij, Ponów, Opcje -->
     <div class="tb-group">
       <button class="tb-btn" id="btnNew" title="Nowy model">${ICONS.neu}<span>Nowy</span></button>
       <button class="tb-btn" id="btnImport" title="Importuj JSON">${ICONS.ul}<span>Wczytaj</span></button>
@@ -5000,14 +4996,24 @@ function buildToolbar(){
       <button class="tb-btn" id="btnOptions" title="Opcje programu">${ICONS.gear}<span>Opcje</span></button>
       <input type="file" id="fileImport" accept="application/json" style="display:none;">
     </div>
-    ${(showSnapToggle||showNewNodesToggle||showBoxSelectToggle)? `<div class="tb-group">
-      ${showSnapToggle? `<button class="tb-btn ${snapEnabled?'active':''}" id="snapToggleBtn" title="Przyciąganie do siatki (${snapSize} m)">${ICONS.grid}<span>Przyciągaj</span></button>`:''}
-      ${showNewNodesToggle? `<button class="tb-btn ${allowNewNodesInBarMode?'active':''}" id="newNodesToggleBtn" title="Twórz nowe węzły podczas rysowania pręta">${ICONS.node}<span>Auto-węzeł</span></button>`:''}
-      ${showBoxSelectToggle? `<button class="tb-btn ${boxSelectEnabled?'active':''}" id="boxSelectToggleBtn" title="Zaznaczanie ramką — gdy włączone, przeciągnięcie po pustym miejscu rysuje ramkę zaznaczenia zamiast przewijać widok">${ICONS.boxselect}<span>Ramka</span></button>`:''}
-    </div>` : ''}
-    <div class="tb-group" style="margin-left:auto;border-right:none;">
-      <button class="tb-btn primary" id="btnRun" title="${isSolved?'Ukryj wyniki i wróć do edycji modelu (Enter)':'Uruchom obliczenia (Enter)'}">${isSolved ? ICONS.back : ICONS.run}<span>${isSolved ? 'WRÓĆ' : 'OBLICZ'}</span></button>
+    <!-- Grupa 2: Zaznacz i Rysuj -->
+    <div class="tb-group">
+      <button class="tb-btn" data-mode="select" title="Zaznacz / przesuń (V)">${ICONS.select}<span>Zaznacz</span></button>
+      <button class="tb-btn" data-mode="addBar" title="Rysuj pręt / węzeł (R / B)">${ICONS.bar}<span>Rysuj</span></button>
     </div>
+    <!-- Grupa 3: Przekrój i Materiał -->
+    <div class="tb-group" ${!hasToggles ? 'style="border-right:none;"' : ''}>
+      <span class="tb-label">Przekrój</span>
+      <select id="defSectionSel" class="tb-select"></select>
+      <span class="tb-label">Materiał</span>
+      <select id="defMaterialSel" class="tb-select"></select>
+    </div>
+    <!-- Grupa 4: Przełączniki (Przyciągaj, Ramka, Auto-węzeł) -->
+    ${hasToggles ? `<div class="tb-group" style="border-right:none;">
+      ${showSnapToggle ? `<button class="tb-btn ${snapEnabled?'active':''}" id="snapToggleBtn" title="Przyciąganie do siatki (${snapSize} m)">${ICONS.grid}<span>Przyciągaj</span></button>` : ''}
+      ${showBoxSelectToggle ? `<button class="tb-btn ${boxSelectEnabled?'active':''}" id="boxSelectToggleBtn" title="Zaznaczanie ramką — gdy włączone, przeciągnięcie po pustym miejscu rysuje ramkę zaznaczenia zamiast przewijać widok">${ICONS.boxselect}<span>Ramka</span></button>` : ''}
+      ${showNewNodesToggle ? `<button class="tb-btn ${allowNewNodesInBarMode?'active':''}" id="newNodesToggleBtn" title="Twórz nowe węzły podczas rysowania pręta">${ICONS.node}<span>Auto-węzeł</span></button>` : ''}
+    </div>` : ''}
   `;
   tb.querySelectorAll('[data-mode]').forEach(b=>{
     b.addEventListener('click', ()=>setMode(b.dataset.mode));
@@ -5049,8 +5055,7 @@ function setMode(m){
   // zmiana narzędzia chowa podgląd współrzędnych/wymiarów z poprzedniej akcji
   lastPlacedNodeId=null; lastDrawnElemId=null;
   const hints={select:selectModeHint(),
-    addBar:'Tryb: Rysuj — kliknij punkt początkowy, potem końcowy (klik w puste miejsce tworzy węzeł)',
-    delete:'Tryb: Usuń — kliknij węzeł lub pręt, aby go usunąć'};
+    addBar:'Tryb: Rysuj — kliknij punkt początkowy, potem końcowy (klik w puste miejsce tworzy węzeł)'};
   setStatusHint(hints[m]||'');
   buildToolbar(); renderSidebar(); render();
 }
@@ -5386,10 +5391,10 @@ function handlePointerDown(px,py){
     clearSelection();
     panState={startX:px,startY:py,startOffX:view.offX,startOffY:view.offY,moved:false};
     renderSidebar(); render();
-  } else if(mode==='addBar' || mode==='delete'){
+  } else if(mode==='addBar'){
     // Defer the actual action to pointer-up: a drag from here should pan the view
     // (and, mid-pinch, get cleared entirely by onTouchStart) rather than immediately
-    // place/delete something — only a genuine tap (no significant movement) acts.
+    // place something — only a genuine tap (no significant movement) acts.
     panState={startX:px,startY:py,startOffX:view.offX,startOffY:view.offY,moved:false,tapMode:mode};
   }
 }
@@ -5437,11 +5442,6 @@ function performTapAction(tapMode,px,py){
       }
     }
     renderSidebar(); render();
-  } else if(tapMode==='delete'){
-    const nid=hitTestNode(px,py);
-    if(nid!=null){ deleteNode(nid); renderSidebar(); render(); return; }
-    const eid=hitTestElement(px,py);
-    if(eid!=null){ deleteElement(eid); renderSidebar(); render(); }
   }
 }
 function onMove(e){
