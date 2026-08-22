@@ -23,6 +23,12 @@
     --text-dim:#5c6b7a;
     --danger:#dc2626;
     --ok:#16a34a;
+    --ok-bg:#dcfce7;
+    --ok-fg:#15803d;
+    --ok-border:#bbf7d0;
+    --accent-tag-bg:#dbeafe;
+    --accent-tag-fg:#1e40af;
+    --accent-tag-border:#bfdbfe;
     --n-color:#16a34a;
     --t-color:#ea580c;
     --m-color:#dc2626;
@@ -49,7 +55,14 @@
     --badge-bg:#0e1520f4;
     --grid-line:#1b2634;
     --grid-line-major:#28384a;
-    --accent-soft:#1e3a5f;
+    --accent-soft:rgba(37, 99, 235, 0.20);
+    --accent-tag-bg:rgba(37, 99, 235, 0.20);
+    --accent-tag-fg:#93c5fd;
+    --accent-tag-border:rgba(147, 197, 253, 0.35);
+    --ok:#22c55e;
+    --ok-bg:rgba(34, 197, 94, 0.20);
+    --ok-fg:#86efac;
+    --ok-border:rgba(134, 239, 172, 0.35);
     --mass-color:#38bdf8;
     --sidebar-bg:#141b26;
     --sidebar-border:#26333f;
@@ -210,10 +223,35 @@
     button.mini-icon svg{width:22px;height:22px;}
   }
 
+  .sidebar-group{border-bottom:2px solid var(--sidebar-border);}
+  .sidebar-group:last-child{border-bottom:none;}
+  .group-header{
+    background:var(--surface-2);border-bottom:1px solid var(--surface-border-soft);
+    padding:8px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--text);display:flex;align-items:center;justify-content:space-between;
+    cursor:pointer;user-select:none;position:sticky;top:0;z-index:2;transition:background 0.12s ease;
+  }
+  .group-header:hover{background:var(--surface);}
+  .group-title{display:flex;align-items:center;gap:7px;}
+  .group-tag{
+    font-size:9.5px;font-weight:600;background:var(--accent-tag-bg);color:var(--accent-tag-fg);
+    border:1px solid var(--accent-tag-border);
+    padding:2px 7px;border-radius:12px;text-transform:none;letter-spacing:0;
+    line-height:1.25;display:inline-flex;align-items:center;
+  }
+  .tag{
+    font-size:9.5px;font-weight:600;background:var(--accent-tag-bg);color:var(--accent-tag-fg);
+    border:1px solid var(--accent-tag-border);
+    padding:2px 6px;border-radius:20px;text-transform:none;letter-spacing:0;
+    line-height:1.25;display:inline-flex;align-items:center;
+  }
+  .group-body .panel:last-child{border-bottom:none;}
+
   .panel{border-bottom:8px solid var(--panel-gutter);padding:12px 14px;}
   .panel h3{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);
     display:flex;align-items:center;justify-content:space-between;}
-  .panel h3 .tag{font-size:9.5px;background:var(--accent-soft);color:var(--accent-dark);padding:2px 6px;border-radius:20px;text-transform:none;letter-spacing:0;}
+  .panel h3 .tag{font-size:9.5px;font-weight:600;background:var(--accent-tag-bg);color:var(--accent-tag-fg);
+    border:1px solid var(--accent-tag-border);padding:2px 6px;border-radius:20px;text-transform:none;letter-spacing:0;line-height:1.25;}
   .card{background:var(--surface-2);border:1px solid var(--surface-border-soft);border-radius:8px;padding:9px 10px;margin-bottom:8px;}
   .row{display:flex;align-items:center;gap:6px;margin-bottom:6px;}
   .row:last-child{margin-bottom:0;}
@@ -259,21 +297,24 @@
   .diagToggle.active{background:var(--surface-2);}
   .diagToggle .lbl{display:flex;align-items:center;font-size:12px;}
   input[type=range]{width:100%;accent-color:var(--accent);}
+  input[type=checkbox]{accent-color:var(--accent);}
+  input[type=radio]{accent-color:var(--accent);}
+  .row input:focus, .row select:focus, .row-pair input:focus, input[type=number]:focus, input[type=text]:focus, select:focus{
+    border-color:var(--accent) !important;
+    outline:1px solid var(--accent) !important;
+  }
   .listitem{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border:1px solid var(--surface-border-soft);
     border-radius:7px;margin-bottom:5px;font-size:11.5px;cursor:pointer;background:var(--surface);}
   .listitem:hover{border-color:var(--accent);}
   .listitem.sel{background:var(--accent-soft);border-color:var(--accent);}
   .listitem .del{color:#b3bcc6;cursor:pointer;padding:2px 5px;border-radius:4px;font-size:13px;}
   .listitem .del:hover{color:var(--danger);background:#fee2e2;}
-  .probeval{display:grid;grid-template-columns:1fr 1fr;gap:5px 10px;font-family:var(--mono);font-size:12px;background:#0f172a;
-    color:#e2e8f0;border-radius:8px;padding:10px;margin-top:8px;}
-  .probeval div span.k{color:#94a3b8;font-family:var(--sans);display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;}
-  .probeval div span.v{font-size:13px;}
   table.probetable{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;background:var(--surface);border:1px solid var(--surface-border-soft);border-radius:6px;overflow:hidden;margin-top:6px;}
   table.probetable th{text-align:right;font-family:var(--sans);color:var(--text-dim);font-weight:600;font-size:10px;padding:4px 6px;background:var(--surface-2);border-bottom:1px solid var(--surface-border-soft);}
   table.probetable td{text-align:right;padding:4px 6px;border-bottom:1px solid var(--surface-border-soft);}
   table.probetable th:first-child, table.probetable td:first-child{text-align:left;}
   table.probetable tr:last-child td{border-bottom:none;}
+  table.probetable tr.section-head td{background:var(--surface-2);font-family:var(--sans);font-weight:600;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);padding:3px 6px;text-align:left;}
   .warn{background:#fff7ed;border:1px solid #fdba74;color:#9a3412;padding:8px 10px;border-radius:7px;font-size:11.5px;margin-bottom:8px;}
   .collapsible-head{cursor:pointer;user-select:none;}
   .subtle-icon{opacity:.6;}
@@ -2306,10 +2347,31 @@ function restoreResultViewForType(type){
   }
 }
 
+/* ---- CSS variable cache helper ---- */
+let _cssCache={};
+function getCss(varName){
+  if(_cssCache[varName]) return _cssCache[varName];
+  const v=getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  _cssCache[varName]=v; return v;
+}
+function clearCssCache(){ _cssCache={}; }
+
 /* ---- program options (persist across model edits & undo/redo, NOT part of the structural model) ---- */
 const STORAGE_OPTIONS_KEY = 'materia_lite_user_options';
 
+const APP_ACCENTS = {
+  blue:    { name: 'Niebieski',    accent: '#2563eb', accentDark: '#1d4ed8', softLight: '#dbeafe', fgLight: '#1e40af', borderLight: '#bfdbfe', softDark: 'rgba(37, 99, 235, 0.22)', fgDark: '#93c5fd', borderDark: 'rgba(147, 197, 253, 0.38)' },
+  indigo:  { name: 'Indygo',       accent: '#4f46e5', accentDark: '#4338ca', softLight: '#e0e7ff', fgLight: '#3730a3', borderLight: '#c7d2fe', softDark: 'rgba(79, 70, 229, 0.22)', fgDark: '#a5b4fc', borderDark: 'rgba(165, 180, 252, 0.38)' },
+  violet:  { name: 'Fioletowy',    accent: '#7c3aed', accentDark: '#6d28d9', softLight: '#ede9fe', fgLight: '#5b21b6', borderLight: '#ddd6fe', softDark: 'rgba(124, 58, 237, 0.22)', fgDark: '#c4b5fd', borderDark: 'rgba(196, 181, 253, 0.38)' },
+  teal:    { name: 'Morski',       accent: '#0d9488', accentDark: '#0f766e', softLight: '#ccfbf1', fgLight: '#115e59', borderLight: '#99f6e4', softDark: 'rgba(13, 148, 136, 0.22)', fgDark: '#5eead4', borderDark: 'rgba(94, 234, 212, 0.38)' },
+  emerald: { name: 'Szmaragdowy',  accent: '#059669', accentDark: '#047857', softLight: '#d1fae5', fgLight: '#065f46', borderLight: '#a7f3d0', softDark: 'rgba(5, 150, 105, 0.22)', fgDark: '#6ee7b7', borderDark: 'rgba(110, 231, 183, 0.38)' },
+  amber:   { name: 'Bursztynowy',  accent: '#d97706', accentDark: '#b45309', softLight: '#fef3c7', fgLight: '#92400e', borderLight: '#fde68a', softDark: 'rgba(217, 119, 6, 0.22)', fgDark: '#fde68a', borderDark: 'rgba(253, 230, 138, 0.38)' },
+  rose:    { name: 'Różany',       accent: '#e11d48', accentDark: '#be123c', softLight: '#ffe4e6', fgLight: '#9f1239', borderLight: '#fecdd3', softDark: 'rgba(225, 29, 72, 0.22)', fgDark: '#fda4af', borderDark: 'rgba(253, 164, 175, 0.38)' },
+  slate:   { name: 'Grafitowy',    accent: '#475569', accentDark: '#334155', softLight: '#e2e8f0', fgLight: '#1e293b', borderLight: '#cbd5e1', softDark: 'rgba(100, 116, 139, 0.22)', fgDark: '#cbd5e1', borderDark: 'rgba(203, 213, 225, 0.38)' }
+};
+
 let currentTheme='light';
+let currentAccent='blue';
 let includeAxialDeformation=true;
 let includeSelfWeight=false;
 let hideLoadsSupportsInResults=false;
@@ -2317,10 +2379,24 @@ let showBackgroundGrid=true;
 let showIdLabels=false;
 let showDimensionLines=false;
 
+function applyAccentVariables(){
+  const def = APP_ACCENTS[currentAccent] || APP_ACCENTS.blue;
+  const isDark = currentTheme === 'dark';
+  const root = document.documentElement;
+  root.style.setProperty('--accent', def.accent);
+  root.style.setProperty('--accent-dark', def.accentDark);
+  root.style.setProperty('--accent-soft', isDark ? def.softDark : def.softLight);
+  root.style.setProperty('--accent-tag-bg', isDark ? def.softDark : def.softLight);
+  root.style.setProperty('--accent-tag-fg', isDark ? def.fgDark : def.fgLight);
+  root.style.setProperty('--accent-tag-border', isDark ? def.borderDark : def.borderLight);
+  if(typeof clearCssCache === 'function') clearCssCache();
+}
+
 function saveAppOptionsToStorage(){
   try {
     const opts = {
       theme: currentTheme,
+      accent: currentAccent,
       includeAxialDeformation,
       includeSelfWeight,
       hideLoadsSupportsInResults,
@@ -2336,34 +2412,39 @@ function saveAppOptionsToStorage(){
 function loadAppOptionsFromStorage(){
   try {
     const raw = localStorage.getItem(STORAGE_OPTIONS_KEY);
-    if(!raw) return;
-    const opts = JSON.parse(raw);
-    if(opts && (opts.theme === 'dark' || opts.theme === 'light')){
-      currentTheme = opts.theme;
-      document.documentElement.setAttribute('data-theme', currentTheme);
-    }
-    if(opts && typeof opts.includeAxialDeformation === 'boolean'){
-      includeAxialDeformation = opts.includeAxialDeformation;
-    }
-    if(opts && typeof opts.includeSelfWeight === 'boolean'){
-      includeSelfWeight = opts.includeSelfWeight;
-    }
-    if(opts && typeof opts.hideLoadsSupportsInResults === 'boolean'){
-      hideLoadsSupportsInResults = opts.hideLoadsSupportsInResults;
-    }
-    if(opts && typeof opts.showBackgroundGrid === 'boolean'){
-      showBackgroundGrid = opts.showBackgroundGrid;
-    }
-    if(opts && typeof opts.showIdLabels === 'boolean'){
-      showIdLabels = opts.showIdLabels;
-    }
-    if(opts && typeof opts.showDimensionLines === 'boolean'){
-      showDimensionLines = opts.showDimensionLines;
-    }
-    if(opts && typeof opts.snapSize === 'number' && opts.snapSize > 0){
-      snapSize = opts.snapSize;
+    if(raw){
+      const opts = JSON.parse(raw);
+      if(opts && (opts.theme === 'dark' || opts.theme === 'light')){
+        currentTheme = opts.theme;
+        document.documentElement.setAttribute('data-theme', currentTheme);
+      }
+      if(opts && opts.accent && APP_ACCENTS[opts.accent]){
+        currentAccent = opts.accent;
+      }
+      if(opts && typeof opts.includeAxialDeformation === 'boolean'){
+        includeAxialDeformation = opts.includeAxialDeformation;
+      }
+      if(opts && typeof opts.includeSelfWeight === 'boolean'){
+        includeSelfWeight = opts.includeSelfWeight;
+      }
+      if(opts && typeof opts.hideLoadsSupportsInResults === 'boolean'){
+        hideLoadsSupportsInResults = opts.hideLoadsSupportsInResults;
+      }
+      if(opts && typeof opts.showBackgroundGrid === 'boolean'){
+        showBackgroundGrid = opts.showBackgroundGrid;
+      }
+      if(opts && typeof opts.showIdLabels === 'boolean'){
+        showIdLabels = opts.showIdLabels;
+      }
+      if(opts && typeof opts.showDimensionLines === 'boolean'){
+        showDimensionLines = opts.showDimensionLines;
+      }
+      if(opts && typeof opts.snapSize === 'number' && opts.snapSize > 0){
+        snapSize = opts.snapSize;
+      }
     }
   } catch(e){}
+  applyAccentVariables();
 }
 loadAppOptionsFromStorage();
 const AXIAL_RIGID_FACTOR=1e5; // used to emulate "no axial deformation" without touching the FEM core
@@ -3552,13 +3633,6 @@ function drawGrid(){
   ctx.beginPath(); ctx.moveTo(0,o.y); ctx.lineTo(rect.width,o.y); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(o.x,0); ctx.lineTo(o.x,rect.height); ctx.stroke();
 }
-let _cssCache={};
-function getCss(varName){
-  if(_cssCache[varName]) return _cssCache[varName];
-  const v=getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
-  _cssCache[varName]=v; return v;
-}
-function clearCssCache(){ _cssCache={}; }
 
 function drawElements(){
   elements.forEach(el=>{
@@ -3805,6 +3879,112 @@ function drawMomentArc(cx,cy,M,r,color,label,offsetDeg,labelAngleDeg){
 function drawLoads(){
   const FCOLOR='#dc2626', MCOLOR='#dc2626', QCOLOR='#0891b2', TCOLOR='#be185d';
   const MASS_COLOR = getCss('--mass-color') || '#0284c7';
+
+  // 1. Obciążenia termiczne (najniższa warstwa obciążeń)
+  elements.forEach(el=>{
+    if(!el.thermal) return;
+    const a=getNode(el.n1), b=getNode(el.n2);
+    const pa=toScreen(a.x,a.y), pb=toScreen(b.x,b.y);
+    const dx=pb.x-pa.x, dy=pb.y-pa.y;
+    const screenLen=Math.hypot(dx,dy)||1;
+    const midx=(pa.x+pb.x)/2, midy=(pa.y+pb.y)/2;
+
+    let ang=Math.atan2(dy,dx);
+    let flip=false;
+    // Obrót tekstu tak, aby był zawsze czytelny od lewej do prawej (-90° do 90°)
+    if(ang > Math.PI/2 || ang < -Math.PI/2){
+      ang += Math.PI;
+      flip = true;
+    }
+
+    // Symetryczny odstęp w pikselach ekranu od osi pręta
+    const offPx = 15;
+    const topYLocal = flip ? offPx : -offPx;
+    const botYLocal = flip ? -offPx : offPx;
+
+    const textTop = 'Δtg=' + fmtSmart(el.thermal.dTtop) + '°C';
+    const textBot = 'Δtd=' + fmtSmart(el.thermal.dTbottom) + '°C';
+
+    ctx.save();
+    ctx.translate(midx, midy);
+    ctx.rotate(ang);
+
+    ctx.font = '10.5px ' + FONT_MONO;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Tło dopasowane do koloru płótna
+    const pad = 3;
+    const wTop = ctx.measureText(textTop).width;
+    ctx.fillStyle = getCss('--badge-bg');
+    ctx.fillRect(-wTop/2 - pad, topYLocal - 6, wTop + 2*pad, 12);
+    ctx.fillStyle = TCOLOR;
+    ctx.fillText(textTop, 0, topYLocal);
+
+    const wBot = ctx.measureText(textBot).width;
+    ctx.fillStyle = getCss('--badge-bg');
+    ctx.fillRect(-wBot/2 - pad, botYLocal - 6, wBot + 2*pad, 12);
+    ctx.fillStyle = TCOLOR;
+    ctx.fillText(textBot, 0, botYLocal);
+
+    ctx.restore();
+  });
+
+  // 2. Obciążenia ciągłe (rozłożone q) - rysowane pod siłami i momentami skupionymi
+  elements.forEach(el=>{
+    if(!el.q) return;
+    const a=getNode(el.n1), b=getNode(el.n2);
+    const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1;
+    const ang=el.q.angle*Math.PI/180;
+    const ldx=Math.cos(ang), ldy=-Math.sin(ang); // screen-space direction for a POSITIVE q value
+    const n = Math.max(4, Math.min(14, Math.round(L*view.scale/38)));
+    const maxLen=42, minLen=14;
+    const qmax = Math.max(Math.abs(el.q.qStart), Math.abs(el.q.qEnd), 1e-9);
+    const qmode = el.q.mode||'resultant';
+    // For projected modes the arrowheads land on the bar's flat horizontal/vertical
+    // *projection* (touching the real bar at its highest/leftmost point), not on its
+    // actual sloped surface. Negative q flips the arrow to the OTHER side of that same
+    // landing point (not just a longer/shorter arrow in the same direction) — so a load
+    // that changes sign along its length draws as a clean bowtie pinching at zero,
+    // matching standard drafting convention, instead of a one-sided dip.
+    let landYFixed=null, landXFixed=null;
+    const bothNegative = el.q.qStart<0 && el.q.qEnd<0;
+    if(qmode==='vertical') landYFixed = toScreen(0, bothNegative? Math.min(a.y,b.y) : Math.max(a.y,b.y)).y;
+    else if(qmode==='horizontal') landXFixed = toScreen(bothNegative? Math.max(a.x,b.x) : Math.min(a.x,b.x), 0).x;
+    let tailPts=[], signDirs=[];
+    for(let i=0;i<=n;i++){
+      const t=i/n;
+      const qx=a.x+dx*t, qy=a.y+dy*t;
+      const qval = el.q.qStart+(el.q.qEnd-el.q.qStart)*t;
+      const sign = qval>=0 ? 1 : -1;
+      const len = minLen + (maxLen-minLen)*Math.abs(qval)/qmax;
+      const base=toScreen(qx,qy);
+      let land;
+      if(qmode==='vertical') land={x:base.x, y:landYFixed};
+      else if(qmode==='horizontal') land={x:landXFixed, y:base.y};
+      else land=base;
+      const dirx=sign*ldx, diry=sign*ldy;
+      const tail={x:land.x-dirx*len, y:land.y-diry*len};
+      drawArrow(tail.x,tail.y, land.x-dirx*4, land.y-diry*4, QCOLOR);
+      tailPts.push(tail); signDirs.push({x:dirx,y:diry});
+    }
+    ctx.strokeStyle=QCOLOR; ctx.lineWidth=1.3; ctx.setLineDash([3,2]);
+    ctx.beginPath(); tailPts.forEach((pt,i)=> i? ctx.lineTo(pt.x,pt.y): ctx.moveTo(pt.x,pt.y)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font='10.5px '+FONT_MONO; ctx.textAlign='center';
+    const txtStart = fmtSmart(el.q.qStart), txtEnd = fmtSmart(el.q.qEnd);
+    const wStart = ctx.measureText(txtStart).width, wEnd = ctx.measureText(txtEnd).width;
+    const sx = tailPts[0].x-signDirs[0].x*11, sy = tailPts[0].y-signDirs[0].y*11;
+    const ex = tailPts[n].x-signDirs[n].x*11, ey = tailPts[n].y-signDirs[n].y*11;
+    ctx.fillStyle = getCss('--badge-bg');
+    ctx.fillRect(sx - wStart/2 - 2, sy - 6, wStart + 4, 12);
+    ctx.fillRect(ex - wEnd/2 - 2, ey - 6, wEnd + 4, 12);
+    ctx.fillStyle=QCOLOR;
+    ctx.fillText(txtStart, sx, sy + 3.5);
+    ctx.fillText(txtEnd, ex, ey + 3.5);
+  });
+
+  // 3. Masy skupione w węzłach
   nodes.forEach(n=>{
     const p=toScreen(n.x,n.y);
     if(n.mass){
@@ -3859,41 +4039,9 @@ function drawLoads(){
         ctx.restore();
       }
     }
-    if(n.force){
-      const len=46;
-      if(n.force.mode==='components'){
-        // rysujemy składową poziomą i pionową osobno; pomijamy zerowe, ujemne
-        // odwracają strzałkę w drugą stronę (analogicznie jak przy trybie kąta).
-        const Fx=n.force.Fx||0, Fy=n.force.Fy||0;
-        if(Math.abs(Fx)>1e-9){
-          const sign = Fx>=0 ? 1 : -1;
-          const dxs=sign, dys=0; // screen space
-          drawArrow(p.x-dxs*len, p.y, p.x-dxs*10, p.y, FCOLOR);
-          ctx.fillStyle=FCOLOR; ctx.font='11px '+FONT_MONO; ctx.textAlign = sign>0?'right':'left';
-          ctx.fillText(fmtSmart(Fx)+' kN', p.x-dxs*len - sign*4, p.y-6);
-        }
-        if(Math.abs(Fy)>1e-9){
-          const sign = Fy>=0 ? 1 : -1;
-          const dxs=0, dys=-sign; // model +y up => screen y flipped
-          drawArrow(p.x, p.y-dys*len, p.x, p.y-dys*10, FCOLOR);
-          ctx.fillStyle=FCOLOR; ctx.font='11px '+FONT_MONO; ctx.textAlign='left';
-          ctx.fillText(fmtSmart(Fy)+' kN', p.x+4, p.y-dys*len - sign*4);
-        }
-      } else {
-        const a=(n.force.angle||0)*Math.PI/180;
-        const sign = (n.force.F||0)>=0 ? 1 : -1;
-        // arrow points TOWARD the node in the load direction (tip at node); negative
-        // magnitude flips the whole arrow to the opposite side, not just its label.
-        const dxs=sign*Math.cos(a), dys=-sign*Math.sin(a); // screen space (y flip)
-        drawArrow(p.x-dxs*len, p.y-dys*len, p.x-dxs*10, p.y-dys*10, FCOLOR);
-        ctx.fillStyle=FCOLOR; ctx.font='11px '+FONT_MONO; ctx.textAlign='left';
-        ctx.fillText(fmtSmart(n.force.F)+' kN', p.x-dxs*len+4, p.y-dys*len-4);
-      }
-    }
-    if(n.moment){
-      drawMomentArc(p.x,p.y,n.moment.M,22,MCOLOR,fmtSmart(n.moment.M)+' kNm');
-    }
   });
+
+  // 4. Momenty skupione za/przed przegubami na końcach prętów (rysowane NAD obciążeniem ciągłym)
   elements.forEach(el=>{
     const a=getNode(el.n1), b=getNode(el.n2);
     if(!a || !b) return;
@@ -3926,97 +4074,62 @@ function drawLoads(){
       drawMomentArc(cx, cy, el.momentHingeEnd, rArc, MCOLOR, fmtSmart(el.momentHingeEnd) + ' kNm', angDeg, angDeg + 180);
     }
   });
-  elements.forEach(el=>{
-    if(!el.q) return;
-    const a=getNode(el.n1), b=getNode(el.n2);
-    const dx=b.x-a.x, dy=b.y-a.y, L=Math.hypot(dx,dy)||1;
-    const ang=el.q.angle*Math.PI/180;
-    const ldx=Math.cos(ang), ldy=-Math.sin(ang); // screen-space direction for a POSITIVE q value
-    const n = Math.max(4, Math.min(14, Math.round(L*view.scale/38)));
-    const maxLen=42, minLen=14;
-    const qmax = Math.max(Math.abs(el.q.qStart), Math.abs(el.q.qEnd), 1e-9);
-    const qmode = el.q.mode||'resultant';
-    // For projected modes the arrowheads land on the bar's flat horizontal/vertical
-    // *projection* (touching the real bar at its highest/leftmost point), not on its
-    // actual sloped surface. Negative q flips the arrow to the OTHER side of that same
-    // landing point (not just a longer/shorter arrow in the same direction) — so a load
-    // that changes sign along its length draws as a clean bowtie pinching at zero,
-    // matching standard drafting convention, instead of a one-sided dip.
-    let landYFixed=null, landXFixed=null;
-    const bothNegative = el.q.qStart<0 && el.q.qEnd<0;
-    if(qmode==='vertical') landYFixed = toScreen(0, bothNegative? Math.min(a.y,b.y) : Math.max(a.y,b.y)).y;
-    else if(qmode==='horizontal') landXFixed = toScreen(bothNegative? Math.max(a.x,b.x) : Math.min(a.x,b.x), 0).x;
-    let tailPts=[], signDirs=[];
-    for(let i=0;i<=n;i++){
-      const t=i/n;
-      const qx=a.x+dx*t, qy=a.y+dy*t;
-      const qval = el.q.qStart+(el.q.qEnd-el.q.qStart)*t;
-      const sign = qval>=0 ? 1 : -1;
-      const len = minLen + (maxLen-minLen)*Math.abs(qval)/qmax;
-      const base=toScreen(qx,qy);
-      let land;
-      if(qmode==='vertical') land={x:base.x, y:landYFixed};
-      else if(qmode==='horizontal') land={x:landXFixed, y:base.y};
-      else land=base;
-      const dirx=sign*ldx, diry=sign*ldy;
-      const tail={x:land.x-dirx*len, y:land.y-diry*len};
-      drawArrow(tail.x,tail.y, land.x-dirx*4, land.y-diry*4, QCOLOR);
-      tailPts.push(tail); signDirs.push({x:dirx,y:diry});
+
+  // 5. Siły skupione i momenty skupione w węzłach (rysowane NAD obciążeniem ciągłym)
+  nodes.forEach(n=>{
+    const p=toScreen(n.x,n.y);
+    if(n.force){
+      const len=46;
+      if(n.force.mode==='components'){
+        // rysujemy składową poziomą i pionową osobno; pomijamy zerowe, ujemne
+        // odwracają strzałkę w drugą stronę (analogicznie jak przy trybie kąta).
+        const Fx=n.force.Fx||0, Fy=n.force.Fy||0;
+        if(Math.abs(Fx)>1e-9){
+          const sign = Fx>=0 ? 1 : -1;
+          const dxs=sign, dys=0; // screen space
+          drawArrow(p.x-dxs*len, p.y, p.x-dxs*10, p.y, FCOLOR);
+          const txt = fmtSmart(Fx)+' kN';
+          ctx.font='11px '+FONT_MONO;
+          const w = ctx.measureText(txt).width;
+          const tx = p.x-dxs*len - sign*4, ty = p.y-6;
+          ctx.fillStyle = getCss('--badge-bg');
+          ctx.fillRect(sign>0 ? tx - w - 2 : tx - 2, ty - 9, w + 4, 13);
+          ctx.fillStyle=FCOLOR; ctx.textAlign = sign>0?'right':'left';
+          ctx.fillText(txt, tx, ty);
+        }
+        if(Math.abs(Fy)>1e-9){
+          const sign = Fy>=0 ? 1 : -1;
+          const dxs=0, dys=-sign; // model +y up => screen y flipped
+          drawArrow(p.x, p.y-dys*len, p.x, p.y-dys*10, FCOLOR);
+          const txt = fmtSmart(Fy)+' kN';
+          ctx.font='11px '+FONT_MONO;
+          const w = ctx.measureText(txt).width;
+          const tx = p.x+4, ty = p.y-dys*len - sign*4;
+          ctx.fillStyle = getCss('--badge-bg');
+          ctx.fillRect(tx - 2, ty - 9, w + 4, 13);
+          ctx.fillStyle=FCOLOR; ctx.textAlign='left';
+          ctx.fillText(txt, tx, ty);
+        }
+      } else {
+        const a=(n.force.angle||0)*Math.PI/180;
+        const sign = (n.force.F||0)>=0 ? 1 : -1;
+        // arrow points TOWARD the node in the load direction (tip at node); negative
+        // magnitude flips the whole arrow to the opposite side, not just its label.
+        const dxs=sign*Math.cos(a), dys=-sign*Math.sin(a); // screen space (y flip)
+        drawArrow(p.x-dxs*len, p.y-dys*len, p.x-dxs*10, p.y-dys*10, FCOLOR);
+        const txt = fmtSmart(n.force.F)+' kN';
+        ctx.font='11px '+FONT_MONO;
+        const w = ctx.measureText(txt).width;
+        const tx = p.x-dxs*len+4, ty = p.y-dys*len-4;
+        ctx.fillStyle = getCss('--badge-bg');
+        ctx.fillRect(tx - 2, ty - 9, w + 4, 13);
+        ctx.fillStyle=FCOLOR; ctx.textAlign='left';
+        ctx.fillText(txt, tx, ty);
+      }
     }
-    ctx.strokeStyle=QCOLOR; ctx.lineWidth=1.3; ctx.setLineDash([3,2]);
-    ctx.beginPath(); tailPts.forEach((pt,i)=> i? ctx.lineTo(pt.x,pt.y): ctx.moveTo(pt.x,pt.y)); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle=QCOLOR; ctx.font='10.5px '+FONT_MONO; ctx.textAlign='center';
-    ctx.fillText(fmtSmart(el.q.qStart), tailPts[0].x-signDirs[0].x*11, tailPts[0].y-signDirs[0].y*11);
-    ctx.fillText(fmtSmart(el.q.qEnd), tailPts[n].x-signDirs[n].x*11, tailPts[n].y-signDirs[n].y*11);
-  });
-  elements.forEach(el=>{
-    if(!el.thermal) return;
-    const a=getNode(el.n1), b=getNode(el.n2);
-    const pa=toScreen(a.x,a.y), pb=toScreen(b.x,b.y);
-    const dx=pb.x-pa.x, dy=pb.y-pa.y;
-    const screenLen=Math.hypot(dx,dy)||1;
-    const midx=(pa.x+pb.x)/2, midy=(pa.y+pb.y)/2;
-
-    let ang=Math.atan2(dy,dx);
-    let flip=false;
-    // Obrót tekstu tak, aby był zawsze czytelny od lewej do prawej (-90° do 90°)
-    if(ang > Math.PI/2 || ang < -Math.PI/2){
-      ang += Math.PI;
-      flip = true;
+    if(n.moment){
+      drawMomentArc(p.x,p.y,n.moment.M,22,MCOLOR,fmtSmart(n.moment.M)+' kNm');
     }
-
-    // Symetryczny odstęp w pikselach ekranu od osi pręta
-    const offPx = 15;
-    const topYLocal = flip ? offPx : -offPx;
-    const botYLocal = flip ? -offPx : offPx;
-
-    const textTop = 'Δtg=' + fmtSmart(el.thermal.dTtop) + '°C';
-    const textBot = 'Δtd=' + fmtSmart(el.thermal.dTbottom) + '°C';
-
-    ctx.save();
-    ctx.translate(midx, midy);
-    ctx.rotate(ang);
-
-    ctx.font = '10.5px ' + FONT_MONO;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    // Tło dopasowane do koloru płótna
-    const pad = 3;
-    const wTop = ctx.measureText(textTop).width;
-    ctx.fillStyle = getCss('--badge-bg');
-    ctx.fillRect(-wTop/2 - pad, topYLocal - 6, wTop + 2*pad, 12);
-    ctx.fillStyle = TCOLOR;
-    ctx.fillText(textTop, 0, topYLocal);
-
-    const wBot = ctx.measureText(textBot).width;
-    ctx.fillStyle = getCss('--badge-bg');
-    ctx.fillRect(-wBot/2 - pad, botYLocal - 6, wBot + 2*pad, 12);
-    ctx.fillStyle = TCOLOR;
-    ctx.fillText(textBot, 0, botYLocal);
-
-    ctx.restore();
   });
 }
 
@@ -4484,6 +4597,7 @@ function render(){
   ctx.clearRect(0,0,rect.width,rect.height);
   ctx.fillStyle=getCss('--bg-canvas'); ctx.fillRect(0,0,rect.width,rect.height);
   if(showBackgroundGrid) drawGrid();
+  if(showDimensionLines) drawModelDimensionLines();
   const isInfluence = solved && solved.type==='influence';
   const isEnvelope = solved && solved.type==='envelope';
   const showingResults = showDeform||showM||showT||showN||showStress||showReactions;
@@ -4509,7 +4623,6 @@ function render(){
   if(!hideLS && !isEnvelope) drawLoads();
   drawNodes();
   if(showIdLabels) drawIdLabels();
-  if(showDimensionLines) drawModelDimensionLines();
   if(showReactions && !isInfluence) drawReactions();
   drawILSectionMarker();
   if(probe.elId!=null && (diagrams || (isInfluence && ilDiagrams) || (isEnvelope && solved && solved.envelopeData))) drawProbeMarker();
@@ -4649,6 +4762,8 @@ function drawModelDimensionLines(){
   ctx.strokeStyle = DIMCOLOR;
   ctx.fillStyle = DIMCOLOR;
 
+  const labelsToDraw = [];
+
   // --- HORIZONTAL DIMENSION LINES (below model) ---
   if(xs.length >= 2){
     const minY = Math.min(...nodes.map(n => n.y));
@@ -4696,17 +4811,7 @@ function drawModelDimensionLines(){
 
       const midx = (paX + pbX) / 2;
       const label = fmt(L, 2) + ' m';
-      ctx.font = '11px ' + FONT_MONO;
-      const w = ctx.measureText(label).width;
-      const padH = 5, h = 15;
-      ctx.fillStyle = DIMCOLOR;
-      roundRect(midx - w/2 - padH, levelY - h/2, w + 2*padH, h, 4);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, midx, levelY);
-      ctx.fillStyle = DIMCOLOR;
+      labelsToDraw.push({ text: label, x: midx, y: levelY });
     };
 
     for(let i = 0; i < xs.length - 1; i++){
@@ -4765,17 +4870,7 @@ function drawModelDimensionLines(){
 
       const midy = (paY + pbY) / 2;
       const label = fmt(H, 2) + ' m';
-      ctx.font = '11px ' + FONT_MONO;
-      const w = ctx.measureText(label).width;
-      const padH = 5, h = 15;
-      ctx.fillStyle = DIMCOLOR;
-      roundRect(levelX - w/2 - padH, midy - h/2, w + 2*padH, h, 4);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, levelX, midy);
-      ctx.fillStyle = DIMCOLOR;
+      labelsToDraw.push({ text: label, x: levelX, y: midy });
     };
 
     for(let j = 0; j < ys.length - 1; j++){
@@ -4787,9 +4882,98 @@ function drawModelDimensionLines(){
     }
   }
 
+  // --- RENDER ALL LABELS / BADGES OVER ALL LINES & TICKS ---
+  ctx.font = '11px ' + FONT_MONO;
+  const padH = 5, h = 15;
+  labelsToDraw.forEach(item => {
+    const w = ctx.measureText(item.text).width;
+    ctx.fillStyle = DIMCOLOR;
+    roundRect(item.x - w/2 - padH, item.y - h/2, w + 2*padH, h, 4);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(item.text, item.x, item.y);
+  });
+
   ctx.restore();
 }
 function drawTransientOverlays(){
+  if(pickState){
+    const pt = getSnapPickPoint(lastMousePx, lastMousePy);
+    const sp = toScreen(pt.x, pt.y);
+
+    ctx.save();
+    // Celownik przyciągania wokół aktualnej pozycji kursora
+    ctx.strokeStyle = getCss('--accent');
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, 6, 0, 2*Math.PI);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(sp.x - 9, sp.y); ctx.lineTo(sp.x - 3, sp.y);
+    ctx.moveTo(sp.x + 3, sp.y); ctx.lineTo(sp.x + 9, sp.y);
+    ctx.moveTo(sp.x, sp.y - 9); ctx.lineTo(sp.x, sp.y - 3);
+    ctx.moveTo(sp.x, sp.y + 3); ctx.lineTo(sp.x, sp.y + 9);
+    ctx.stroke();
+
+    if(pt.nodeId != null){
+      ctx.fillStyle = getCss('--accent');
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, 3.2, 0, 2*Math.PI);
+      ctx.fill();
+    }
+
+    if(pickState.step === 2 && pickState.p1){
+      const sp1 = toScreen(pickState.p1.x, pickState.p1.y);
+
+      // Punkt startowy (P1)
+      ctx.fillStyle = getCss('--accent');
+      ctx.beginPath();
+      ctx.arc(sp1.x, sp1.y, 4.5, 0, 2*Math.PI);
+      ctx.fill();
+
+      // Linia / wektor od P1 do aktualnego punktu
+      ctx.strokeStyle = getCss('--accent');
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(sp1.x, sp1.y);
+      ctx.lineTo(sp.x, sp.y);
+      ctx.stroke();
+
+      const dist = Math.hypot(pt.x - pickState.p1.x, pt.y - pickState.p1.y);
+      const pixelDist = Math.hypot(sp.x - sp1.x, sp.y - sp1.y);
+      if(pixelDist >= 20 && dist >= 0.01){
+        drawSegmentDimensionPoints(sp1, sp, dist);
+      }
+
+      if(pickState.target === 'mirrorLine'){
+        const dx = sp.x - sp1.x, dy = sp.y - sp1.y;
+        const len = Math.hypot(dx, dy);
+        if(len > 5){
+          const ux = dx/len, uy = dy/len;
+          ctx.strokeStyle = getCss('--accent-dark');
+          ctx.lineWidth = 1.3;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.moveTo(sp1.x - ux * 2000, sp1.y - uy * 2000);
+          ctx.lineTo(sp.x + ux * 2000, sp.y + uy * 2000);
+          ctx.stroke();
+        }
+      }
+    } else if(pickState.target === 'rotateCenter'){
+      ctx.strokeStyle = getCss('--accent');
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, 12, 0, 2*Math.PI);
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
   if(dragNode!=null){
     drawElementDimensions(connectedElements(dragNode));
     drawNodeCoordTip(dragNode);
@@ -5059,11 +5243,18 @@ function selectModeHint(){
     : 'Tryb: Zaznacz — kliknij węzeł/pręt, przeciągnij aby przesunąć lub przewinąć widok';
 }
 function setMode(m){
+  cancelPicking();
   mode=m; barStart=null; clearSelection(); boxSelectState=null;
   // zmiana narzędzia chowa podgląd współrzędnych/wymiarów z poprzedniej akcji
   lastPlacedNodeId=null; lastDrawnElemId=null;
+  if(m==='addBar'){
+    addBarRel=false;
+    addBarPolar=false;
+    addBarVal1='0';
+    addBarVal2='0';
+  }
   const hints={select:selectModeHint(),
-    addBar:'Tryb: Rysuj — kliknij punkt początkowy, potem końcowy (klik w puste miejsce tworzy węzeł)'};
+    addBar:'Tryb: Rysuj — kliknij punkt początkowy i końcowy lub wpisz współrzędne w panelu'};
   setStatusHint(hints[m]||'');
   buildToolbar(); renderSidebar(); render();
 }
@@ -5073,17 +5264,41 @@ function setMode(m){
 function setTheme(theme){
   currentTheme=theme;
   document.documentElement.setAttribute('data-theme', theme==='dark'?'dark':'light');
-  clearCssCache();
+  applyAccentVariables();
   saveAppOptionsToStorage();
   render();
   if(document.getElementById('optionsOverlay')) openOptionsModal(); // refresh active state
 }
+function setAppAccent(accentKey){
+  if(!APP_ACCENTS[accentKey]) accentKey = 'blue';
+  currentAccent = accentKey;
+  applyAccentVariables();
+  saveAppOptionsToStorage();
+  buildToolbar();
+  renderSidebar();
+  render();
+  if(document.getElementById('optionsOverlay')) openOptionsModal();
+}
 function optionRowTheme(){
   return `<div style="margin-bottom:16px;">
-    <div style="font-size:12.5px;font-weight:600;margin-bottom:6px;">Motyw aplikacji</div>
-    <div class="btnrow">
-      <button class="mini ${currentTheme==='light'?'on':''}" id="themeLightBtn">Jasny</button>
-      <button class="mini ${currentTheme==='dark'?'on':''}" id="themeDarkBtn">Ciemny</button>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;">
+      <div>
+        <div style="font-size:12.5px;font-weight:600;margin-bottom:6px;">Motyw aplikacji</div>
+        <div class="btnrow" style="margin-top:0;">
+          <button class="mini ${currentTheme==='light'?'on':''}" id="themeLightBtn">Jasny</button>
+          <button class="mini ${currentTheme==='dark'?'on':''}" id="themeDarkBtn">Ciemny</button>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:12.5px;font-weight:600;margin-bottom:6px;">Kolorystyka</div>
+        <div style="display:flex;gap:6px;align-items:center;padding-top:2px;">
+          ${Object.keys(APP_ACCENTS).map(k => {
+            const acc = APP_ACCENTS[k];
+            const isSel = (currentAccent === k);
+            return `<button class="accent-pick-btn" data-accent="${k}" style="width:22px;height:22px;border-radius:50%;background:${acc.accent};border:none;cursor:pointer;padding:0;outline:${isSel?'2.5px solid var(--text)':'2px solid transparent'};outline-offset:2px;box-shadow:0 1px 3px rgba(0,0,0,0.25);transform:${isSel?'scale(1.12)':'scale(1)'};transition:transform 0.12s, outline-color 0.12s;" title="${acc.name}"></button>`;
+          }).join('')}
+        </div>
+      </div>
     </div>
   </div>`;
 }
@@ -5102,7 +5317,7 @@ function openOptionsModal(){
   overlay.id='optionsOverlay';
   overlay.style.cssText='position:fixed;inset:0;background:#0f172a99;z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;';
   overlay.innerHTML=`
-    <div id="optionsCard" style="background:var(--sidebar-bg);color:var(--text);border-radius:12px;max-width:420px;width:100%;max-height:86vh;overflow-y:auto;box-shadow:0 20px 60px #0008;">
+    <div id="optionsCard" style="background:var(--sidebar-bg);color:var(--text);border-radius:12px;max-width:440px;width:100%;max-height:86vh;overflow-y:auto;box-shadow:0 20px 60px #0008;">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--sidebar-border);position:sticky;top:0;background:var(--sidebar-bg);">
         <h2 style="margin:0;font-size:14.5px;">Opcje programu</h2>
         <button id="optionsCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-dim);line-height:1;padding:4px;">✕</button>
@@ -5141,6 +5356,9 @@ function openOptionsModal(){
   document.getElementById('aboutAppBtn').addEventListener('click', ()=>{ openAboutModal(); });
   document.getElementById('themeLightBtn').addEventListener('click', ()=>setTheme('light'));
   document.getElementById('themeDarkBtn').addEventListener('click', ()=>setTheme('dark'));
+  document.querySelectorAll('.accent-pick-btn').forEach(btn => {
+    btn.addEventListener('click', () => setAppAccent(btn.dataset.accent));
+  });
   document.getElementById('axialOpt').addEventListener('change',(e)=>{ includeAxialDeformation=e.target.checked; saveAppOptionsToStorage(); invalidateResults(); renderSidebar(); render(); });
   document.getElementById('selfWeightOpt').addEventListener('change',(e)=>{ includeSelfWeight=e.target.checked; saveAppOptionsToStorage(); invalidateResults(); renderSidebar(); render(); });
   document.getElementById('hideLSOpt').addEventListener('change',(e)=>{ hideLoadsSupportsInResults=e.target.checked; saveAppOptionsToStorage(); render(); });
@@ -5192,6 +5410,17 @@ function openAboutModal(){
           </div>
           <div class="muted" style="margin-top:10px;font-size:11.5px;line-height:1.4;background:var(--surface);padding:8px 10px;border-radius:6px;border:1px solid var(--surface-border-soft);">
             💬 <strong>Uwagi i zgłoszenia:</strong> Jeśli znalazłeś błąd w działaniu programu lub chciałbyś zasugerować nowe funkcje i poprawki, zachęcam do kontaktu drogą mailową.
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:14px;">
+          <div style="font-weight:600;margin-bottom:6px;color:var(--text);display:flex;align-items:center;gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Prywatność i przetwarzanie danych
+          </div>
+          <div style="font-size:11.5px;color:var(--text-dim);line-height:1.5;">
+            Wszystkie obliczenia w programie są wykonywane <strong>lokalnie w Twojej przeglądarce</strong>. 
+            Program nie przesyła żadnych danych na zewnętrzne serwery. Ustawienia aplikacji oraz stan projektu są przechowywane lokalnie w pamięci podręcznej przeglądarki użytkownika.
           </div>
         </div>
 
@@ -5362,6 +5591,10 @@ function handlePointerDown(px,py){
   hoverNodeId=null; hoverElemId=null;
   // każda nowa akcja chowa poprzedni podgląd współrzędnych/wymiarów
   lastPlacedNodeId=null; lastDrawnElemId=null;
+  if(pickState){
+    panState={startX:px, startY:py, startOffX:view.offX, startOffY:view.offY, moved:false, isPick:true};
+    return;
+  }
   if(mode==='select'){
     setStatusHint(selectModeHint());
     const nid=hitTestNode(px,py);
@@ -5431,14 +5664,20 @@ function performTapAction(tapMode,px,py){
       barStart=useId;
       if(createdNodeId!=null) lastPlacedNodeId = createdNodeId;
       setStatusHint('Tryb: Rysuj — wybierz punkt końcowy');
+      updateAddBarValAfterStep(0, 0);
     } else if(barStart===useId){
       setStatusHint('Wybrano ten sam węzeł.');
     } else {
+      const prevSn = getNode(barStart);
+      const nextSn = getNode(useId);
+      const dx = (prevSn && nextSn) ? nextSn.x - prevSn.x : 0;
+      const dy = (prevSn && nextSn) ? nextSn.y - prevSn.y : 0;
       const exists = elements.some(e=>(e.n1===barStart&&e.n2===useId)||(e.n1===useId&&e.n2===barStart));
       if(exists){
         setStatusHint(`Pręt między węzłami W${barStart} i W${useId} już istnieje.`);
         barStart=useId;
         if(createdNodeId!=null) lastPlacedNodeId = createdNodeId;
+        updateAddBarValAfterStep(dx, dy);
       } else {
         const createdId = createElement(barStart,useId);
         if(createdId!=null){
@@ -5446,6 +5685,7 @@ function performTapAction(tapMode,px,py){
           lastDrawnElemId = createdId;
           if(createdNodeId!=null) lastPlacedNodeId = createdNodeId;
           setStatusHint('Tryb: Rysuj — wybierz punkt końcowy');
+          updateAddBarValAfterStep(dx, dy);
         }
       }
     }
@@ -5457,9 +5697,18 @@ function onMove(e){
   handlePointerMove(e.clientX-rect.left, e.clientY-rect.top);
 }
 function handlePointerMove(px,py){
+  lastMousePx = px;
+  lastMousePy = py;
   mouseModel=toModel(px,py);
   const coordsEl=document.getElementById('coords');
-  if(coordsEl) coordsEl.textContent = `x=${mouseModel.x.toFixed(2)}\u00A0m,  y=${mouseModel.y.toFixed(2)}\u00A0m`;
+  if(coordsEl){
+    if(pickState){
+      const pt = getSnapPickPoint(px, py);
+      coordsEl.textContent = `x=${pt.x.toFixed(2)}\u00A0m,  y=${pt.y.toFixed(2)}\u00A0m (Wskaż)`;
+    } else {
+      coordsEl.textContent = `x=${mouseModel.x.toFixed(2)}\u00A0m,  y=${mouseModel.y.toFixed(2)}\u00A0m`;
+    }
+  }
   if(dragNode!=null){
     const n=getNode(dragNode);
     if(n){
@@ -5501,6 +5750,14 @@ function handlePointerMove(px,py){
     render();
     return;
   }
+  if(pickState){
+    const pt = getSnapPickPoint(px, py);
+    hoverNodeId = pt.nodeId;
+    hoverElemId = null;
+    canvas.style.cursor = 'crosshair';
+    render();
+    return;
+  }
   if(mode==='select'){
     const nid=hitTestNode(px,py);
     const eid = nid==null? hitTestElement(px,py): null;
@@ -5520,6 +5777,18 @@ function handlePointerMove(px,py){
 function onUp(e){ handlePointerUp(); }
 function handlePointerUp(){
   hoverNodeId=null; hoverElemId=null;
+  if(panState && panState.isPick){
+    const wasMoved = panState.moved;
+    const sx = panState.startX, sy = panState.startY;
+    panState = null;
+    if(!wasMoved){
+      const pt = getSnapPickPoint(sx, sy);
+      handlePickPoint(pt);
+    }
+    renderSidebar();
+    render();
+    return;
+  }
   if(dragNode!=null){
     const draggedId = dragNode;
     const wasMoved = dragNodeState ? dragNodeState.moved : false;
@@ -5577,6 +5846,13 @@ function onKey(e){
   if((e.ctrlKey||e.metaKey) && !e.shiftKey && (e.key==='z'||e.key==='Z')){ e.preventDefault(); doUndo(); return; }
   if((e.ctrlKey||e.metaKey) && ((e.key==='y'||e.key==='Y') || (e.shiftKey && (e.key==='z'||e.key==='Z')))){ e.preventDefault(); doRedo(); return; }
   if(e.key==='Escape'){
+    if(pickState){
+      cancelPicking();
+      setStatusHint('Anulowano tryb wskazywania.');
+      renderSidebar();
+      render();
+      return;
+    }
     if(document.getElementById('exportOverlay')){ closeExportModal(); return; }
     if(document.getElementById('optionsOverlay')){ closeOptionsModal(); return; }
     setMode('select'); return;
@@ -5670,27 +5946,160 @@ function initEvents(){
 }
 
 /* =========================================================================
-   SIDEBAR — properties panel
+   SIDEBAR — properties panel & collapsible groups
    ========================================================================= */
-let addMatFormOpen=false, addSecFormOpen=false, libraryCollapsed=false;
+let addMatFormOpen=false, addSecFormOpen=false;
+let addBarCoordsCollapsed=false, nodesGroupCollapsed=false, elementsGroupCollapsed=false, calcGroupCollapsed=false, analysisCollapsed=false, libraryCollapsed=false;
 let newSecCategoryState='katalog';   // 'katalog' | 'ksztalt' | 'wlasny'
 let newSecCatalogTypeState='IPN';    // klucz do CATALOG_DEFS
 let newSecShapeState='rect';         // dla 'ksztalt': rect|circ|pipe|box|ibeam|tee|angle
+
+function toggleAddBarCoordsCollapse(){ addBarCoordsCollapsed=!addBarCoordsCollapsed; renderSidebar(); }
+function toggleNodesGroupCollapse(){ nodesGroupCollapsed=!nodesGroupCollapsed; renderSidebar(); }
+function toggleElementsGroupCollapse(){ elementsGroupCollapsed=!elementsGroupCollapsed; renderSidebar(); }
+function toggleCalcGroupCollapse(){ calcGroupCollapsed=!calcGroupCollapsed; renderSidebar(); }
+function toggleAnalysisCollapse(){ analysisCollapsed=!analysisCollapsed; renderSidebar(); }
+function toggleLibraryCollapse(){ libraryCollapsed=!libraryCollapsed; renderSidebar(); }
 
 function renderSidebar(){
   checkAndPushHistory();
   pruneSelection();
   const sb=document.getElementById('sidebarScroll');
-  sb.innerHTML = panelSelection() + panelResults() + panelAnalysisType() + panelLibrary();
+  let html='';
+
+  if(mode === 'addBar'){
+    // Zwijana grupa "Współrzędne" widoczna tylko w trybie rysowania prętów
+    const sn = (barStart != null) ? getNode(barStart) : null;
+    const tagText = sn ? `Start: W${sn.id}` : 'Nowy pręt';
+    html += `
+    <div class="sidebar-group">
+      <div class="group-header" onclick="toggleAddBarCoordsCollapse()">
+        <div class="group-title">
+          <span>Współrzędne</span>
+          <span class="group-tag">${tagText}</span>
+        </div>
+        <span class="subtle-icon">${addBarCoordsCollapsed?'▸':'▾'}</span>
+      </div>
+      <div class="group-body" style="${addBarCoordsCollapsed?'display:none;':''}">
+        ${panelAddBarCoordinates()}
+      </div>
+    </div>`;
+  } else {
+    const nSel=selectedNodes(), eSel=selectedElements();
+    const total = nSel.length + eSel.length;
+
+    // 0. Komunikat "Właściwości" na samej górze poza kategoriami
+    if(total === 0){
+      const boxHint = boxSelectEnabled? '<br><br>Ramka zaznaczania jest włączona — przeciągnij po pustym miejscu, aby zaznaczyć kilka węzłów/prętów naraz.' : '';
+      html += `<div class="panel"><h3>Właściwości</h3><div class="empty-state">Zaznacz węzeł lub pręt na rysunku (tryb „Zaznacz”),<br>aby edytować jego właściwości: podpory, obciążenia, przekrój i materiał.${boxHint}</div></div>`;
+    } else if(total > 1){
+      const parts = [];
+      if(nSel.length) parts.push(pluralUnit(nSel.length, 'węzeł', 'węzły', 'węzłów'));
+      if(eSel.length) parts.push(pluralUnit(eSel.length, 'pręt', 'pręty', 'prętów'));
+
+      let scopeText = '';
+      if(nSel.length && eSel.length){
+        scopeText = 'Edycje poniżej dotyczą wszystkich zaznaczonych węzłów lub, odpowiednio, prętów.';
+      } else if(nSel.length){
+        scopeText = 'Edycje poniżej dotyczą wszystkich zaznaczonych węzłów.';
+      } else {
+        scopeText = 'Edycje poniżej dotyczą wszystkich zaznaczonych prętów.';
+      }
+
+      html += `<div class="panel"><h3>Właściwości</h3><div class="muted">Zaznaczono: <b>${parts.join(', ')}</b>. ${scopeText}</div></div>`;
+    }
+
+    // 1. Grupa WĘZŁY (widoczna gdy przynajmniej jeden węzeł jest zaznaczony)
+    if(nSel.length > 0){
+      const multi = nSel.length > 1;
+      const tagText = multi ? `${nSel.length} zaznaczone` : `W${nSel[0].id}`;
+      html += `
+      <div class="sidebar-group">
+        <div class="group-header" onclick="toggleNodesGroupCollapse()">
+          <div class="group-title">
+            <span>Węzły</span>
+            <span class="group-tag">${tagText}</span>
+          </div>
+          <span class="subtle-icon">${nodesGroupCollapsed?'▸':'▾'}</span>
+        </div>
+        <div class="group-body" style="${nodesGroupCollapsed?'display:none;':''}">
+          ${panelNode(nSel)}
+        </div>
+      </div>`;
+    }
+
+    // 2. Grupa PRĘTY (widoczna gdy przynajmniej jeden pręt jest zaznaczony)
+    if(eSel.length > 0){
+      const multi = eSel.length > 1;
+      const tagText = multi ? `${eSel.length} zaznaczone` : `P${eSel[0].id}`;
+      html += `
+      <div class="sidebar-group">
+        <div class="group-header" onclick="toggleElementsGroupCollapse()">
+          <div class="group-title">
+            <span>Pręty</span>
+            <span class="group-tag">${tagText}</span>
+          </div>
+          <span class="subtle-icon">${elementsGroupCollapsed?'▸':'▾'}</span>
+        </div>
+        <div class="group-body" style="${elementsGroupCollapsed?'display:none;':''}">
+          ${panelElement(eSel)}
+        </div>
+      </div>`;
+    }
+  }
+
+  // 3. Grupa OBLICZENIA (zawsze dostępna: Wyniki na górze, Rodzaj analizy na dole)
+  const anType = (analysisSettings && analysisSettings.type) || 'linear_static';
+  const analysisNames = {
+    'linear_static': 'Statyka liniowa',
+    'stability': 'Stateczność',
+    'modal': 'Drgania własne',
+    'harmonic': 'Drgania wymuszone',
+    'influence': 'Linie wpływu',
+    'envelope': 'Obwiednia sił'
+  };
+  const curAnName = analysisNames[anType] || 'Statyka liniowa';
+  const calcTag = solved
+    ? `<span class="group-tag" style="background:var(--ok-bg);color:var(--ok-fg);border-color:var(--ok-border);">Rozwiązano</span>`
+    : `<span class="group-tag">${curAnName}</span>`;
+
+  html += `
+  <div class="sidebar-group">
+    <div class="group-header" onclick="toggleCalcGroupCollapse()">
+      <div class="group-title">
+        <span>Obliczenia</span>
+        ${calcTag}
+      </div>
+      <span class="subtle-icon">${calcGroupCollapsed?'▸':'▾'}</span>
+    </div>
+    <div class="group-body" style="${calcGroupCollapsed?'display:none;':''}">
+      ${panelResults()}
+      ${panelAnalysisType()}
+    </div>
+  </div>`;
+
+  // 4. Grupa BIBLIOTEKA (zawsze dostępna, 2 oddzielne panele: Materiały i Przekroje)
+  html += `
+  <div class="sidebar-group">
+    <div class="group-header" onclick="toggleLibraryCollapse()">
+      <div class="group-title">
+        <span>Biblioteka</span>
+        <span class="group-tag">${materials.length} mat. / ${sections.length} przekr.</span>
+      </div>
+      <span class="subtle-icon">${libraryCollapsed?'▸':'▾'}</span>
+    </div>
+    <div class="group-body" style="${libraryCollapsed?'display:none;':''}">
+      ${panelLibrary()}
+    </div>
+  </div>`;
+
+  sb.innerHTML = html;
   sb.querySelectorAll('[data-indeterminate="true"]').forEach(el=>{ el.indeterminate=true; });
 }
 
 /* =========================================================================
    SIDEBAR — analysis type panel
    ========================================================================= */
-let analysisCollapsed=false;
-function toggleAnalysisCollapse(){ analysisCollapsed=!analysisCollapsed; renderSidebar(); }
-
 function setAnalysisType(type){
   if(!analysisSettings) analysisSettings = {type:'linear_static', params:{bucklingModes:4, modalModes:4, harmonicFreq:5.0, includeElementMass:true}};
   analysisSettings.type = type;
@@ -5712,79 +6121,68 @@ function updateAnalysisParam(key, val){
 function panelAnalysisType(){
   const type = (analysisSettings && analysisSettings.type) || 'linear_static';
   const params = (analysisSettings && analysisSettings.params) || {bucklingModes:4, modalModes:4, harmonicFreq:5.0, includeElementMass:true};
-  const analysisNames = {
-    'linear_static': 'Statyka liniowa',
-    'stability': 'Stateczność',
-    'modal': 'Drgania własne',
-    'harmonic': 'Drgania wymuszone',
-    'influence': 'Linie wpływu',
-    'envelope': 'Obwiednia sił'
-  };
-  const currentTypeName = analysisNames[type] || 'Statyka liniowa';
 
   return `<div class="panel">
     <h3 class="collapsible-head" onclick="toggleAnalysisCollapse()" style="cursor:pointer;user-select:none;">
-      <span>Rodzaj analizy ${analysisCollapsed ? `<span style="font-weight:400;font-size:11px;color:var(--text-dim);text-transform:none;letter-spacing:0;margin-left:6px;">— ${currentTypeName}</span>` : ''}</span>
+      <span>Rodzaj analizy</span>
       <span class="subtle-icon">${analysisCollapsed?'▸':'▾'}</span>
     </h3>
     <div id="analysisBody" style="${analysisCollapsed?'display:none;':''}">
-      <div class="card">
-        <div class="row">
-          <label style="min-width:70px;">Analiza</label>
-          <select id="analysisTypeSel" onchange="setAnalysisType(this.value)">
-            <option value="linear_static" ${type==='linear_static'?'selected':''}>Statyka liniowa</option>
-            <option value="stability" ${type==='stability'?'selected':''}>Stateczność (wyboczenie)</option>
-            <option value="modal" ${type==='modal'?'selected':''}>Drgania własne (modalna)</option>
-            <option value="harmonic" ${type==='harmonic'?'selected':''}>Drgania wymuszone (harmoniczne)</option>
-            <option value="influence" ${type==='influence'?'selected':''}>Linie wpływu (siły przekrojowe)</option>
-            <option value="envelope" ${type==='envelope'?'selected':''}>Obwiednia sił (obciążenie ruchome)</option>
-          </select>
-        </div>
-        ${type==='linear_static' ? `
-          <div class="muted" style="margin-top:6px;line-height:1.4;">
-            Podstawowa analiza statyczna I rzędu: wyznacza siły wewnętrzne (N, T, M), ugięcia i reakcje dla zadanego obciążenia.
-          </div>
-        ` : ''}
-        ${type==='stability' ? `
-          <div class="row" style="margin-top:8px;">
-            <label style="min-width:110px;">Liczba form (modów)</label>
-            <input type="number" min="1" max="50" step="1" value="${params.bucklingModes||4}" onchange="updateAnalysisParam('bucklingModes', Math.max(1, parseInt(this.value)||1))" style="max-width:70px;">
-          </div>
-          <div class="muted" style="margin-top:6px;line-height:1.4;">
-            Analiza wyboczeniowa / stateczności: wyznacza mnożniki obciążenia krytycznego i formy utraty stateczności.
-          </div>
-        ` : ''}
-        ${type==='modal' ? `
-          <div class="row" style="margin-top:8px;">
-            <label style="min-width:110px;">Liczba form drgań</label>
-            <input type="number" min="1" max="50" step="1" value="${params.modalModes||4}" onchange="updateAnalysisParam('modalModes', Math.max(1, parseInt(this.value)||1))" style="max-width:70px;">
-          </div>
-          <div class="checkline" style="margin-top:8px;">
-            <input type="checkbox" id="modalIncludeElemMass" ${(params.includeElementMass!==false)?'checked':''} onchange="updateAnalysisParam('includeElementMass', this.checked)"> Uwzględnij masę prętów
-          </div>
-          <div class="muted" style="margin-top:6px;line-height:1.4;">
-            Analiza modalna: wyznacza częstotliwości drgań f [Hz], okresy T [s], częstości kołowe ω [rad/s] oraz formy drgań z uwzględnieniem mas skupionych w węzłach i masy własnej prętów.
-          </div>
-        ` : ''}
-        ${type==='harmonic' ? `
-          <div class="row" style="margin-top:8px;">
-            <label style="min-width:110px;">Częstotliwość f</label>
-            <input type="number" min="0" max="10000" step="0.1" value="${params.harmonicFreq!=null?params.harmonicFreq:5.0}" onchange="updateAnalysisParam('harmonicFreq', Math.max(0, parseFloat(this.value)||0))" style="max-width:80px;">
-            <span class="unit">Hz</span>
-          </div>
-          <div class="checkline" style="margin-top:8px;">
-            <input type="checkbox" id="harmonicIncludeElemMass" ${(params.includeElementMass!==false)?'checked':''} onchange="updateAnalysisParam('includeElementMass', this.checked)"> Uwzględnij masę prętów
-          </div>
-          <div class="checkline" style="margin-top:6px;">
-            <input type="checkbox" id="harmonicIncludeGravity" ${(params.includeGravity===true)?'checked':''} onchange="updateAnalysisParam('includeGravity', this.checked)"> Uwzględnij grawitację (ciężar prętów + mas ↓)
-          </div>
-          <div class="muted" style="margin-top:6px;line-height:1.4;">
-            Drgania wymuszone: oblicza 4 skrajne stany kombinacji sił statycznych, bezwładności i grawitacji (±F_stat ± F_dyn + G). Grawitacja uwzględnia masy skupione m_y oraz masę prętów.
-          </div>
-        ` : ''}
-        ${type==='influence' ? panelInfluenceSetupHtml(params) : ''}
-        ${type==='envelope' ? panelEnvelopeSetupHtml(params) : ''}
+      <div class="row">
+        <label style="min-width:70px;">Analiza</label>
+        <select id="analysisTypeSel" onchange="setAnalysisType(this.value)">
+          <option value="linear_static" ${type==='linear_static'?'selected':''}>Statyka liniowa</option>
+          <option value="stability" ${type==='stability'?'selected':''}>Stateczność (wyboczenie)</option>
+          <option value="modal" ${type==='modal'?'selected':''}>Drgania własne (modalna)</option>
+          <option value="harmonic" ${type==='harmonic'?'selected':''}>Drgania wymuszone (harmoniczne)</option>
+          <option value="influence" ${type==='influence'?'selected':''}>Linie wpływu (siły przekrojowe)</option>
+          <option value="envelope" ${type==='envelope'?'selected':''}>Obwiednia sił (obciążenie ruchome)</option>
+        </select>
       </div>
+      ${type==='linear_static' ? `
+        <div class="muted" style="margin-top:6px;line-height:1.4;">
+          Podstawowa analiza statyczna I rzędu: wyznacza siły wewnętrzne (N, T, M), ugięcia i reakcje dla zadanego obciążenia.
+        </div>
+      ` : ''}
+      ${type==='stability' ? `
+        <div class="row" style="margin-top:8px;">
+          <label style="min-width:110px;">Liczba form (modów)</label>
+          <input type="number" min="1" max="50" step="1" value="${params.bucklingModes||4}" onchange="updateAnalysisParam('bucklingModes', Math.max(1, parseInt(this.value)||1))" style="max-width:70px;">
+        </div>
+        <div class="muted" style="margin-top:6px;line-height:1.4;">
+          Analiza wyboczeniowa / stateczności: wyznacza mnożniki obciążenia krytycznego i formy utraty stateczności.
+        </div>
+      ` : ''}
+      ${type==='modal' ? `
+        <div class="row" style="margin-top:8px;">
+          <label style="min-width:110px;">Liczba form drgań</label>
+          <input type="number" min="1" max="50" step="1" value="${params.modalModes||4}" onchange="updateAnalysisParam('modalModes', Math.max(1, parseInt(this.value)||1))" style="max-width:70px;">
+        </div>
+        <div class="checkline" style="margin-top:8px;">
+          <input type="checkbox" id="modalIncludeElemMass" ${(params.includeElementMass!==false)?'checked':''} onchange="updateAnalysisParam('includeElementMass', this.checked)"> Uwzględnij masę prętów
+        </div>
+        <div class="muted" style="margin-top:6px;line-height:1.4;">
+          Analiza modalna: wyznacza częstotliwości drgań f [Hz], okresy T [s], częstości kołowe ω [rad/s] oraz formy drgań z uwzględnieniem mas skupionych w węzłach i masy własnej prętów.
+        </div>
+      ` : ''}
+      ${type==='harmonic' ? `
+        <div class="row" style="margin-top:8px;">
+          <label style="min-width:110px;">Częstotliwość f</label>
+          <input type="number" min="0" max="10000" step="0.1" value="${params.harmonicFreq!=null?params.harmonicFreq:5.0}" onchange="updateAnalysisParam('harmonicFreq', Math.max(0, parseFloat(this.value)||0))" style="max-width:80px;">
+          <span class="unit">Hz</span>
+        </div>
+        <div class="checkline" style="margin-top:8px;">
+          <input type="checkbox" id="harmonicIncludeElemMass" ${(params.includeElementMass!==false)?'checked':''} onchange="updateAnalysisParam('includeElementMass', this.checked)"> Uwzględnij masę prętów
+        </div>
+        <div class="checkline" style="margin-top:6px;">
+          <input type="checkbox" id="harmonicIncludeGravity" ${(params.includeGravity===true)?'checked':''} onchange="updateAnalysisParam('includeGravity', this.checked)"> Uwzględnij grawitację (ciężar prętów + mas ↓)
+        </div>
+        <div class="muted" style="margin-top:6px;line-height:1.4;">
+          Drgania wymuszone: oblicza 4 skrajne stany kombinacji sił statycznych, bezwładności i grawitacji (±F_stat ± F_dyn + G). Grawitacja uwzględnia masy skupione m_y oraz masę prętów.
+        </div>
+      ` : ''}
+      ${type==='influence' ? panelInfluenceSetupHtml(params) : ''}
+      ${type==='envelope' ? panelEnvelopeSetupHtml(params) : ''}
     </div>
   </div>`;
 }
@@ -5903,15 +6301,333 @@ function updateUndoRedoButtons(){
   if(r) r.disabled = redoStack.length===0;
 }
 
+let addBarRel = false;
+let addBarPolar = false;
+let addBarVal1 = '0';
+let addBarVal2 = '0';
+let addBarLastDx = 2;
+let addBarLastDy = 0;
+
+function readAddBarInps(){
+  const inp1 = document.getElementById('addBarVal1Inp');
+  const inp2 = document.getElementById('addBarVal2Inp');
+  if(inp1) addBarVal1 = inp1.value;
+  if(inp2) addBarVal2 = inp2.value;
+}
+
+function updateAddBarValAfterStep(dx, dy){
+  if(Math.hypot(dx, dy) > 1e-6){
+    addBarLastDx = Math.round(dx * 1000) / 1000;
+    addBarLastDy = Math.round(dy * 1000) / 1000;
+  }
+  const sn = (barStart != null) ? getNode(barStart) : null;
+  const sx = sn ? sn.x : 0;
+  const sy = sn ? sn.y : 0;
+
+  if(addBarRel || addBarPolar){
+    // Jeśli pola względne były równe 0 lub nieustawione, zainicjuj je ostatnim przyrostem
+    const v1 = parseFloat(addBarVal1) || 0;
+    const v2 = parseFloat(addBarVal2) || 0;
+    if(v1 === 0 && v2 === 0){
+      if(addBarPolar){
+        const L = Math.hypot(addBarLastDx, addBarLastDy);
+        const ang = Math.atan2(addBarLastDy, addBarLastDx) * 180 / Math.PI;
+        addBarVal1 = (Math.round(L * 1000) / 1000).toString();
+        addBarVal2 = (Math.round(normalizeAngle(ang) * 100) / 100).toString();
+      } else {
+        addBarVal1 = addBarLastDx.toString();
+        addBarVal2 = addBarLastDy.toString();
+      }
+    }
+  } else {
+    // W trybie bezwzględnym zaktualizuj podpowiedź celu na sx + addBarLastDx, sy + addBarLastDy
+    addBarVal1 = (Math.round((sx + addBarLastDx) * 1000) / 1000).toString();
+    addBarVal2 = (Math.round((sy + addBarLastDy) * 1000) / 1000).toString();
+  }
+}
+
+function convertAddBarMode(oldRel, oldPolar, newRel, newPolar){
+  readAddBarInps();
+
+  const sn = (barStart != null) ? getNode(barStart) : null;
+  const sx = sn ? sn.x : 0;
+  const sy = sn ? sn.y : 0;
+
+  const v1 = parseFloat(addBarVal1) || 0;
+  const v2 = parseFloat(addBarVal2) || 0;
+
+  // 1. Oblicz cel w układzie bezwzględnym
+  let targetX, targetY;
+  if(oldPolar){
+    const rad = v2 * Math.PI / 180;
+    targetX = sx + v1 * Math.cos(rad);
+    targetY = sy + v1 * Math.sin(rad);
+  } else if(oldRel){
+    targetX = sx + v1;
+    targetY = sy + v2;
+  } else {
+    targetX = v1;
+    targetY = v2;
+  }
+
+  // 2. Przelicz cel na nowy tryb
+  if(newPolar){
+    const dx = targetX - sx;
+    const dy = targetY - sy;
+    const L = Math.hypot(dx, dy);
+    const ang = Math.atan2(dy, dx) * 180 / Math.PI;
+    addBarVal1 = (Math.round(L * 1000) / 1000).toString();
+    addBarVal2 = (Math.round(normalizeAngle(ang) * 100) / 100).toString();
+  } else if(newRel){
+    const dx = targetX - sx;
+    const dy = targetY - sy;
+    addBarVal1 = (Math.round(dx * 1000) / 1000).toString();
+    addBarVal2 = (Math.round(dy * 1000) / 1000).toString();
+  } else {
+    addBarVal1 = (Math.round(targetX * 1000) / 1000).toString();
+    addBarVal2 = (Math.round(targetY * 1000) / 1000).toString();
+  }
+}
+
+function toggleAddBarRel(val){
+  const oldRel = addBarRel, oldPolar = addBarPolar;
+  const newRel = val;
+  const newPolar = val ? oldPolar : false;
+
+  convertAddBarMode(oldRel, oldPolar, newRel, newPolar);
+
+  addBarRel = newRel;
+  addBarPolar = newPolar;
+
+  renderSidebar();
+}
+
+function toggleAddBarPolar(val){
+  const oldRel = addBarRel, oldPolar = addBarPolar;
+  const newPolar = val;
+  const newRel = val ? true : oldRel;
+
+  convertAddBarMode(oldRel, oldPolar, newRel, newPolar);
+
+  addBarRel = newRel;
+  addBarPolar = newPolar;
+
+  renderSidebar();
+}
+
+function resetBarStart(){
+  barStart = null;
+  addBarVal1 = '0';
+  addBarVal2 = '0';
+  setStatusHint('Zresetowano punkt początkowy rysowania.');
+  renderSidebar();
+  render();
+}
+
+function panelAddBarCoordinates(){
+  const sn = (barStart != null) ? getNode(barStart) : null;
+  if(barStart != null && !sn){
+    barStart = null;
+    return panelAddBarCoordinates();
+  }
+
+  let label1 = 'X', unit1 = 'm', step1 = '0.5';
+  let label2 = 'Y', unit2 = 'm', step2 = '0.5';
+  let hintText = sn
+    ? 'Wpisz bezwzględne współrzędne węzła końcowego (X, Y).'
+    : 'Wpisz bezwzględne współrzędne pierwszego węzła (X, Y).';
+
+  if(addBarPolar){
+    label1 = 'Długość L';
+    unit1 = 'm';
+    step1 = '0.5';
+    label2 = 'Kąt α';
+    unit2 = '°';
+    step2 = '5';
+    hintText = sn
+      ? `Wpisz długość L [m] oraz kąt nachylenia α [°] względem węzła W${sn.id}.`
+      : 'Wpisz długość L [m] oraz kąt nachylenia α [°] względem początku układu (0,0).';
+  } else if(addBarRel){
+    label1 = 'ΔX';
+    unit1 = 'm';
+    step1 = '0.5';
+    label2 = 'ΔY';
+    unit2 = 'm';
+    step2 = '0.5';
+    hintText = sn
+      ? `Wpisz przyrosty współrzędnych (ΔX, ΔY) względem węzła W${sn.id}.`
+      : 'Wpisz przyrosty współrzędnych (ΔX, ΔY) względem początku układu (0,0).';
+  }
+
+  const startInfoCard = sn ? `<div class="card" style="margin-bottom:10px;background:var(--surface);display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-color:var(--input-border);">
+    <div style="font-size:12px;">
+      <span style="font-weight:600;color:var(--accent);">Początek: W${sn.id}</span>
+      <span class="muted" style="margin-left:4px;">(x = ${fmtSmart(sn.x)} m, y = ${fmtSmart(sn.y)} m)</span>
+    </div>
+    <button class="mini" onclick="resetBarStart()" title="Zmień/anuluj punkt początkowy">Zmień</button>
+  </div>` : `<div class="muted" style="margin-bottom:10px;">Wpisz współrzędne pierwszego węzła (początku pręta):</div>`;
+
+  return `<div class="panel">
+    <h3>Współrzędne</h3>
+    ${startInfoCard}
+    <div class="checkline" style="margin-bottom:4px;">
+      <input type="checkbox" id="chkAddBarRel" ${addBarRel ? 'checked' : ''} onchange="toggleAddBarRel(this.checked)">
+      <label for="chkAddBarRel" style="cursor:pointer;user-select:none;">Względnie</label>
+    </div>
+    <div class="checkline" style="margin-bottom:10px;">
+      <input type="checkbox" id="chkAddBarPolar" ${addBarPolar ? 'checked' : ''} onchange="toggleAddBarPolar(this.checked)">
+      <label for="chkAddBarPolar" style="cursor:pointer;user-select:none;">Długość i kąt</label>
+    </div>
+    <div class="row-pair" style="margin-bottom:10px;">
+      <div class="half">
+        <label>${label1}</label>
+        <div class="inp-unit">
+          <input type="number" step="${step1}" id="addBarVal1Inp" value="${addBarVal1}" oninput="addBarVal1=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();confirmAddBarCoords();}">
+          <span class="unit">${unit1}</span>
+        </div>
+      </div>
+      <div class="half">
+        <label>${label2}</label>
+        <div class="inp-unit">
+          <input type="number" step="${step2}" id="addBarVal2Inp" value="${addBarVal2}" oninput="addBarVal2=this.value" onkeydown="if(event.key==='Enter'){event.preventDefault();confirmAddBarCoords();}">
+          <span class="unit">${unit2}</span>
+        </div>
+      </div>
+    </div>
+    <button class="primary-btn" onclick="confirmAddBarCoords()">Zatwierdź</button>
+    <div class="muted" style="margin-top:8px;line-height:1.35;">${hintText}</div>
+  </div>`;
+}
+
+function confirmAddBarCoords(){
+  readAddBarInps();
+
+  const v1 = parseFloat(addBarVal1);
+  const v2 = parseFloat(addBarVal2);
+
+  if(isNaN(v1) || isNaN(v2)){
+    setStatusHint('Wpisz poprawne wartości liczbowe dla współrzędnych.');
+    return;
+  }
+
+  if(barStart == null){
+    let targetX = v1, targetY = v2;
+    if(addBarPolar){
+      const rad = v2 * Math.PI / 180;
+      targetX = v1 * Math.cos(rad);
+      targetY = v1 * Math.sin(rad);
+    }
+    targetX = Math.round(targetX * 1e6) / 1e6;
+    targetY = Math.round(targetY * 1e6) / 1e6;
+    const nodeId = findOrCreateNodeAt(targetX, targetY);
+    barStart = nodeId;
+    lastPlacedNodeId = nodeId;
+    setStatusHint(`Wyznaczono punkt początkowy w W${nodeId} (x=${fmtSmart(targetX)} m, y=${fmtSmart(targetY)} m).`);
+    updateAddBarValAfterStep(0, 0);
+    invalidateResults();
+    renderSidebar();
+    render();
+    return;
+  }
+
+  const sn = getNode(barStart);
+  if(!sn){
+    barStart = null;
+    confirmAddBarCoords();
+    return;
+  }
+
+  let targetX, targetY;
+  if(addBarPolar){
+    const L = v1;
+    const angleDeg = v2;
+    if(Math.abs(L) < 1e-6){
+      setStatusHint('Długość L musi być większa od zera.');
+      return;
+    }
+    const rad = angleDeg * Math.PI / 180;
+    targetX = sn.x + L * Math.cos(rad);
+    targetY = sn.y + L * Math.sin(rad);
+  } else if(addBarRel){
+    targetX = sn.x + v1;
+    targetY = sn.y + v2;
+  } else {
+    targetX = v1;
+    targetY = v2;
+  }
+
+  targetX = Math.round(targetX * 1e6) / 1e6;
+  targetY = Math.round(targetY * 1e6) / 1e6;
+
+  const dx = targetX - sn.x;
+  const dy = targetY - sn.y;
+
+  if(Math.hypot(dx, dy) < 1e-4){
+    setStatusHint(`Wyznaczono punkt w tej samej pozycji co punkt początkowy W${sn.id}.`);
+    return;
+  }
+
+  const targetNodeId = findOrCreateNodeAt(targetX, targetY);
+  
+  const exists = elements.some(e => (e.n1 === barStart && e.n2 === targetNodeId) || (e.n1 === targetNodeId && e.n2 === barStart));
+  if(exists){
+    setStatusHint(`Pręt między W${barStart} a W${targetNodeId} już istnieje.`);
+    barStart = targetNodeId;
+  } else {
+    const createdElemId = createElement(barStart, targetNodeId);
+    if(createdElemId != null){
+      const prevStart = barStart;
+      barStart = targetNodeId;
+      lastDrawnElemId = createdElemId;
+      lastPlacedNodeId = targetNodeId;
+      setStatusHint(`Utworzono pręt P${createdElemId} między W${prevStart} a W${targetNodeId}.`);
+    }
+  }
+
+  checkAndMergeCoincidentNode(targetNodeId);
+  updateAddBarValAfterStep(dx, dy);
+
+  invalidateResults();
+  renderSidebar();
+  render();
+}
+
+function pluralUnit(n, one, few, many) {
+  if (n === 1) return `${n} ${one}`;
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return `${n} ${few}`;
+  }
+  return `${n} ${many}`;
+}
+
 function panelSelection(){
+  if(mode === 'addBar'){
+    return panelAddBarCoordinates();
+  }
   const nSel=selectedNodes(), eSel=selectedElements();
   if(nSel.length===0 && eSel.length===0){
     const boxHint = boxSelectEnabled? '<br><br>Ramka zaznaczania jest włączona — przeciągnij po pustym miejscu, aby zaznaczyć kilka węzłów/prętów naraz.' : '';
     return `<div class="panel"><h3>Właściwości</h3><div class="empty-state">Zaznacz węzeł lub pręt na rysunku (tryb „Zaznacz”),<br>aby edytować jego właściwości: podpory, obciążenia, przekrój i materiał.${boxHint}</div></div>`;
   }
   let html='';
-  if(nSel.length && eSel.length){
-    html += `<div class="panel"><div class="muted">Zaznaczono: ${nSel.length} ${nSel.length===1?'węzeł':'węzły/węzłów'}, ${eSel.length} ${eSel.length===1?'pręt':'pręty/prętów'}. Edycje poniżej dotyczą wszystkich zaznaczonych węzłów lub, odpowiednio, prętów.</div></div>`;
+  const total = nSel.length + eSel.length;
+  if(total > 1){
+    const parts = [];
+    if(nSel.length) parts.push(pluralUnit(nSel.length, 'węzeł', 'węzły', 'węzłów'));
+    if(eSel.length) parts.push(pluralUnit(eSel.length, 'pręt', 'pręty', 'prętów'));
+
+    let scopeText = '';
+    if(nSel.length && eSel.length){
+      scopeText = 'Edycje poniżej dotyczą wszystkich zaznaczonych węzłów lub, odpowiednio, prętów.';
+    } else if(nSel.length){
+      scopeText = 'Edycje poniżej dotyczą wszystkich zaznaczonych węzłów.';
+    } else {
+      scopeText = 'Edycje poniżej dotyczą wszystkich zaznaczonych prętów.';
+    }
+
+    html += `<div class="panel"><div class="muted">Zaznaczono: ${parts.join(', ')}. ${scopeText}</div></div>`;
   }
   if(nSel.length) html += panelNode(nSel);
   if(eSel.length) html += panelElement(eSel);
@@ -6267,8 +6983,159 @@ function confirmSplitBulk(){
   invalidateResults(); renderSidebar(); render();
 }
 
+/* ---- interactive canvas point / vector picking for transform tools ---- */
+let pickState = null;
+let lastMousePx = null, lastMousePy = null;
+
+function isPickingTarget(target){
+  return pickState != null && pickState.target === target;
+}
+
+function cancelPicking(){
+  if(!pickState) return;
+  pickState = null;
+  hoverNodeId = null;
+}
+
+function startPick(target){
+  pickState = {
+    target: target,
+    step: 1,
+    p1: null
+  };
+  if(target === 'moveVector'){
+    setStatusHint('Tryb wskazywania: Wskaż punkt początkowy (1/2) wektora przeniesienia na modelu [lub Esc aby anulować].');
+  } else if(target === 'copyVector'){
+    setStatusHint('Tryb wskazywania: Wskaż punkt początkowy (1/2) wektora kopiowania na modelu [lub Esc aby anulować].');
+  } else if(target === 'rotateCenter'){
+    setStatusHint('Tryb wskazywania: Wskaż punkt środka obrotu na modelu (1 kliknięcie) [lub Esc aby anulować].');
+  } else if(target === 'mirrorLine'){
+    setStatusHint('Tryb wskazywania: Wskaż Punkt 1 (1/2) linii lustra na modelu [lub Esc aby anulować].');
+  } else if(target === 'mirrorP1'){
+    setStatusHint('Tryb wskazywania: Wskaż Punkt 1 linii lustra na modelu [lub Esc aby anulować].');
+  } else if(target === 'mirrorP2'){
+    setStatusHint('Tryb wskazywania: Wskaż Punkt 2 linii lustra na modelu [lub Esc aby anulować].');
+  }
+  renderSidebar();
+  render();
+}
+
+function togglePick(target){
+  if(isPickingTarget(target)){
+    cancelPicking();
+    setStatusHint('Anulowano tryb wskazywania.');
+    renderSidebar();
+    render();
+  } else {
+    startPick(target);
+  }
+}
+
+function getSnapPickPoint(px, py){
+  if(px == null || py == null){
+    return { x: snap(mouseModel.x), y: snap(mouseModel.y), nodeId: null };
+  }
+  const nid = hitTestNode(px, py);
+  if(nid != null){
+    const n = getNode(nid);
+    if(n) return { x: n.x, y: n.y, nodeId: n.id };
+  }
+  const mp = toModel(px, py);
+  return {
+    x: snap(mp.x),
+    y: snap(mp.y),
+    nodeId: null
+  };
+}
+
+function handlePickPoint(pt){
+  if(!pickState) return;
+  const target = pickState.target;
+  if(target === 'moveVector'){
+    if(pickState.step === 1){
+      pickState.p1 = pt;
+      pickState.step = 2;
+      setStatusHint(`Wskazano punkt początkowy (${fmtSmart(pt.x)}, ${fmtSmart(pt.y)}) m. Wskaż punkt końcowy (2/2) wektora przeniesienia.`);
+      renderSidebar();
+      render();
+    } else {
+      const p1 = pickState.p1;
+      const dx = Math.round((pt.x - p1.x) * 1000) / 1000;
+      const dy = Math.round((pt.y - p1.y) * 1000) / 1000;
+      moveDx = dx;
+      moveDy = dy;
+      pickState = null;
+      setStatusHint(`Wskazano wektor przeniesienia: Δx = ${fmtSmart(dx)} m, Δy = ${fmtSmart(dy)} m.`);
+      renderSidebar();
+      render();
+    }
+  } else if(target === 'copyVector'){
+    if(pickState.step === 1){
+      pickState.p1 = pt;
+      pickState.step = 2;
+      setStatusHint(`Wskazano punkt początkowy (${fmtSmart(pt.x)}, ${fmtSmart(pt.y)}) m. Wskaż punkt końcowy (2/2) wektora kopiowania.`);
+      renderSidebar();
+      render();
+    } else {
+      const p1 = pickState.p1;
+      const dx = Math.round((pt.x - p1.x) * 1000) / 1000;
+      const dy = Math.round((pt.y - p1.y) * 1000) / 1000;
+      copyDx = dx;
+      copyDy = dy;
+      pickState = null;
+      setStatusHint(`Wskazano wektor kopiowania: Δx = ${fmtSmart(dx)} m, Δy = ${fmtSmart(dy)} m.`);
+      renderSidebar();
+      render();
+    }
+  } else if(target === 'rotateCenter'){
+    rotCx = Math.round(pt.x * 1000) / 1000;
+    rotCy = Math.round(pt.y * 1000) / 1000;
+    rotInitialized = true;
+    pickState = null;
+    setStatusHint(`Wskazano środek obrotu: X = ${fmtSmart(rotCx)} m, Y = ${fmtSmart(rotCy)} m.`);
+    renderSidebar();
+    render();
+  } else if(target === 'mirrorLine'){
+    if(pickState.step === 1){
+      pickState.p1 = pt;
+      pickState.step = 2;
+      mirX1 = Math.round(pt.x * 1000) / 1000;
+      mirY1 = Math.round(pt.y * 1000) / 1000;
+      mirInitialized = true;
+      setStatusHint(`Wskazano Punkt 1 (${fmtSmart(mirX1)}, ${fmtSmart(mirY1)}) m. Wskaż Punkt 2 (2/2) linii lustra.`);
+      renderSidebar();
+      render();
+    } else {
+      mirX2 = Math.round(pt.x * 1000) / 1000;
+      mirY2 = Math.round(pt.y * 1000) / 1000;
+      mirInitialized = true;
+      pickState = null;
+      setStatusHint(`Wskazano linię lustra: P1(${fmtSmart(mirX1)}, ${fmtSmart(mirY1)}) → P2(${fmtSmart(mirX2)}, ${fmtSmart(mirY2)}).`);
+      renderSidebar();
+      render();
+    }
+  } else if(target === 'mirrorP1'){
+    mirX1 = Math.round(pt.x * 1000) / 1000;
+    mirY1 = Math.round(pt.y * 1000) / 1000;
+    mirInitialized = true;
+    pickState = null;
+    setStatusHint(`Wskazano Punkt 1 linii lustra: (${fmtSmart(mirX1)}, ${fmtSmart(mirY1)}) m.`);
+    renderSidebar();
+    render();
+  } else if(target === 'mirrorP2'){
+    mirX2 = Math.round(pt.x * 1000) / 1000;
+    mirY2 = Math.round(pt.y * 1000) / 1000;
+    mirInitialized = true;
+    pickState = null;
+    setStatusHint(`Wskazano Punkt 2 linii lustra: (${fmtSmart(mirX2)}, ${fmtSmart(mirY2)}) m.`);
+    renderSidebar();
+    render();
+  }
+}
+
 /* ---- shared inline-form bookkeeping: only one of split/move/copy/rotate/mirror form is open at a time ---- */
 function closeAllInlineForms(){
+  cancelPicking();
   splitFormElId=null; moveFormOpen=false; copyFormOpen=false;
   nodeRotateFormOpen=false; nodeMirrorFormOpen=false;
   copyRotateFormOpen=false; copyMirrorFormOpen=false;
@@ -6280,16 +7147,24 @@ function openMoveForm(){
   const wasOpen=moveFormOpen;
   closeAllInlineForms();
   moveFormOpen = !wasOpen;
-  moveDx=0; moveDy=0;
   renderSidebar();
 }
 function closeMoveForm(){ moveFormOpen=false; renderSidebar(); }
 function setMoveDx(v){ moveDx=parseFloat(v)||0; }
 function setMoveDy(v){ moveDy=parseFloat(v)||0; }
 function moveFormHtml(){
+  const isPick = isPickingTarget('moveVector');
+  let btnLabel = 'Wskaż wektor';
+  if(isPick){
+    btnLabel = pickState.step === 1 ? 'Wskaż punkt początkowy (1/2)...' : 'Wskaż punkt końcowy (2/2)...';
+  }
   return `<div class="card" style="margin-top:8px;background:var(--surface);border-color:var(--input-border);">
     <div class="muted" style="margin-bottom:6px;">Wektor przeniesienia zaznaczonych węzłów.</div>
     ${pairRow('Δx',moveDx,'0.1','m',`setMoveDx(this.value)`,'Δy',moveDy,'0.1','m',`setMoveDy(this.value)`)}
+    <div class="btnrow" style="margin-top:6px;">
+      <button class="mini ${isPick?'on':''}" onclick="togglePick('moveVector')" title="Wskaż wektor na modelu (kliknij 2 punkty: początek i koniec)">${btnLabel}</button>
+      ${isPick ? `<button class="mini" onclick="cancelPicking();renderSidebar();render();">Anuluj wskazywanie</button>` : ''}
+    </div>
     <div class="btnrow" style="margin-top:8px;">
       <button class="mini on" onclick="confirmMove()">Przenieś</button>
       <button class="mini" onclick="closeMoveForm()">Anuluj</button>
@@ -6332,9 +7207,18 @@ function closeCopyForm(){ copyFormOpen=false; renderSidebar(); }
 function setCopyDx(v){ copyDx=parseFloat(v)||0; }
 function setCopyDy(v){ copyDy=parseFloat(v)||0; }
 function copyFormHtml(){
+  const isPick = isPickingTarget('copyVector');
+  let btnLabel = 'Wskaż wektor';
+  if(isPick){
+    btnLabel = pickState.step === 1 ? 'Wskaż punkt początkowy (1/2)...' : 'Wskaż punkt końcowy (2/2)...';
+  }
   return `<div class="card" style="margin-top:8px;background:var(--surface);border-color:var(--input-border);">
     <div class="muted" style="margin-bottom:6px;">Kopiuje zaznaczone pręty wraz z ich węzłami, podporami i obciążeniami. Węzły i pręty, które po skopiowaniu pokryją się z istniejącymi, zostaną automatycznie połączone.</div>
     ${pairRow('Wektor kopiowania Δx',copyDx,'0.1','m',`setCopyDx(this.value)`,'Wektor kopiowania Δy',copyDy,'0.1','m',`setCopyDy(this.value)`)}
+    <div class="btnrow" style="margin-top:6px;">
+      <button class="mini ${isPick?'on':''}" onclick="togglePick('copyVector')" title="Wskaż wektor na modelu (kliknij 2 punkty: początek i koniec)">${btnLabel}</button>
+      ${isPick ? `<button class="mini" onclick="cancelPicking();renderSidebar();render();">Anuluj wskazywanie</button>` : ''}
+    </div>
     <div class="btnrow" style="margin-top:8px;">
       <button class="mini on" onclick="confirmCopy()">Kopiuj</button>
       <button class="mini" onclick="closeCopyForm()">Anuluj</button>
@@ -6383,27 +7267,33 @@ function applyTransformMergePass(ids){
 }
 /* Shared rotate/mirror parameter state (only one inline form is open at a time, so the same
    fields can safely be reused by the node "Obróć"/"Lustrzane odbicie" actions and by the
-   pręt "Kopiuj z obrotem"/"Kopiuj z lustrzanym odbiciem" actions). */
+   pręt "Kopiuj z obrotem"/"Kopiuj z lustrzanym odbiciem" actions). Values are remembered across uses. */
+let rotInitialized=false, mirInitialized=false;
 let rotCx=0, rotCy=0, rotAngle=90;
 let mirX1=0, mirY1=0, mirX2=1, mirY2=0;
-function setRotCx(v){ rotCx=parseFloat(v)||0; }
-function setRotCy(v){ rotCy=parseFloat(v)||0; }
-function setRotAngle(v){ rotAngle=parseFloat(v)||0; }
-function setMirX1(v){ mirX1=parseFloat(v)||0; }
-function setMirY1(v){ mirY1=parseFloat(v)||0; }
-function setMirX2(v){ mirX2=parseFloat(v)||0; }
-function setMirY2(v){ mirY2=parseFloat(v)||0; }
+function setRotCx(v){ rotCx=parseFloat(v)||0; rotInitialized=true; }
+function setRotCy(v){ rotCy=parseFloat(v)||0; rotInitialized=true; }
+function setRotAngle(v){ rotAngle=parseFloat(v)||0; rotInitialized=true; }
+function setMirX1(v){ mirX1=parseFloat(v)||0; mirInitialized=true; }
+function setMirY1(v){ mirY1=parseFloat(v)||0; mirInitialized=true; }
+function setMirX2(v){ mirX2=parseFloat(v)||0; mirInitialized=true; }
+function setMirY2(v){ mirY2=parseFloat(v)||0; mirInitialized=true; }
 function setTransformDefaults(ids, mode){
   const pts=ids.map(getNode).filter(Boolean);
   if(!pts.length) return;
   const cx=pts.reduce((s,n)=>s+n.x,0)/pts.length;
   const cy=pts.reduce((s,n)=>s+n.y,0)/pts.length;
-  if(mode==='rotate'){ rotCx=Math.round(cx*100)/100; rotCy=Math.round(cy*100)/100; rotAngle=90; }
-  else { mirX1=Math.round((cx-1)*100)/100; mirY1=Math.round(cy*100)/100; mirX2=Math.round((cx+1)*100)/100; mirY2=Math.round(cy*100)/100; }
+  if(mode==='rotate'){ rotCx=Math.round(cx*100)/100; rotCy=Math.round(cy*100)/100; rotAngle=90; rotInitialized=true; }
+  else { mirX1=Math.round((cx-1)*100)/100; mirY1=Math.round(cy*100)/100; mirX2=Math.round((cx+1)*100)/100; mirY2=Math.round(cy*100)/100; mirInitialized=true; }
 }
 function rotateFormFields(confirmFn,cancelFn){
+  const isPick = isPickingTarget('rotateCenter');
   return `<div class="card" style="margin-top:8px;background:var(--surface);border-color:var(--input-border);">
     ${pairRow('Środek obrotu X',rotCx,'0.1','m',`setRotCx(this.value)`,'Środek obrotu Y',rotCy,'0.1','m',`setRotCy(this.value)`)}
+    <div class="btnrow" style="margin-top:6px;margin-bottom:8px;">
+      <button class="mini ${isPick?'on':''}" onclick="togglePick('rotateCenter')" title="Wskaż punkt środka obrotu na modelu (1 kliknięcie)">${isPick ? 'Wskaż punkt na modelu...' : 'Wskaż środek'}</button>
+      ${isPick ? `<button class="mini" onclick="cancelPicking();renderSidebar();render();">Anuluj wskazywanie</button>` : ''}
+    </div>
     <div class="row"><label>Kąt obrotu</label><input type="number" step="5" value="${rotAngle}" onchange="setRotAngle(this.value)"><span class="unit">°</span></div>
     <div class="muted">Kąt dodatni = przeciwnie do ruchu wskazówek zegara.</div>
     <div class="btnrow" style="margin-top:8px;">
@@ -6413,10 +7303,26 @@ function rotateFormFields(confirmFn,cancelFn){
   </div>`;
 }
 function mirrorFormFields(confirmFn,cancelFn){
+  const isPickLine = isPickingTarget('mirrorLine');
+  const isPickP1 = isPickingTarget('mirrorP1');
+  const isPickP2 = isPickingTarget('mirrorP2');
+  const anyPick = isPickLine || isPickP1 || isPickP2;
+
+  let lineBtnText = 'Wskaż linię (2 punkty)';
+  if(isPickLine){
+    lineBtnText = pickState.step === 1 ? 'Wskaż Punkt 1 (1/2)...' : 'Wskaż Punkt 2 (2/2)...';
+  }
+
   return `<div class="card" style="margin-top:8px;background:var(--surface);border-color:var(--input-border);">
     <div class="muted" style="margin-bottom:6px;">Podaj współrzędne dwóch punktów wyznaczających linię lustra.</div>
     ${pairRow('Punkt 1 – X',mirX1,'0.1','m',`setMirX1(this.value)`,'Punkt 1 – Y',mirY1,'0.1','m',`setMirY1(this.value)`)}
     ${pairRow('Punkt 2 – X',mirX2,'0.1','m',`setMirX2(this.value)`,'Punkt 2 – Y',mirY2,'0.1','m',`setMirY2(this.value)`)}
+    <div class="btnrow" style="margin-top:6px;margin-bottom:6px;gap:4px;">
+      <button class="mini ${isPickLine?'on':''}" onclick="togglePick('mirrorLine')" title="Wskaż 2 punkty wyznaczające linię lustra">${lineBtnText}</button>
+      <button class="mini ${isPickP1?'on':''}" onclick="togglePick('mirrorP1')" title="Wskaż Punkt 1 na modelu">${isPickP1 ? 'Wskaż P1...' : 'Wskaż P1'}</button>
+      <button class="mini ${isPickP2?'on':''}" onclick="togglePick('mirrorP2')" title="Wskaż Punkt 2 na modelu">${isPickP2 ? 'Wskaż P2...' : 'Wskaż P2'}</button>
+      ${anyPick ? `<button class="mini" onclick="cancelPicking();renderSidebar();render();">Anuluj</button>` : ''}
+    </div>
     <div class="btnrow" style="margin-top:8px;">
       <button class="mini on" onclick="${confirmFn}">Odbij</button>
       <button class="mini" onclick="${cancelFn}">Anuluj</button>
@@ -6430,7 +7336,7 @@ function mirrorFormFields(confirmFn,cancelFn){
    transforms force components; flipHandedness (true only for mirroring) negates concentrated
    moments and per-hinge moments and swaps thermal ΔT top/bottom, matching a reflection's
    reversal of ccw/cw sense. */
-function copyElementsTransformed(posFn, angleFn, vecFn, flipHandedness){
+function copyElementsTransformed(posFn, angleFn, vecFn, flipHandedness, supportAngleFn){
   const elArr = selectedElements();
   if(!elArr.length) return null;
   const nodeIdMap = new Map();
@@ -6438,6 +7344,7 @@ function copyElementsTransformed(posFn, angleFn, vecFn, flipHandedness){
   elArr.forEach(e=>{
     [e.n1,e.n2].forEach(id=>{ if(srcNodeIds.indexOf(id)===-1) srcNodeIds.push(id); });
   });
+  const supAngleTransform = supportAngleFn || angleFn;
   srcNodeIds.forEach(id=>{
     const n=getNode(id); if(!n) return;
     const p=posFn(n.x,n.y);
@@ -6447,7 +7354,7 @@ function copyElementsTransformed(posFn, angleFn, vecFn, flipHandedness){
     nn.moment = n.moment? JSON.parse(JSON.stringify(n.moment)) : null;
     nn.support = n.support? JSON.parse(JSON.stringify(n.support)) : null;
     nn.mass = n.mass? JSON.parse(JSON.stringify(n.mass)) : null;
-    if(nn.support){ nn.support.angleDeg = angleFn(nn.support.angleDeg||0); }
+    if(nn.support){ nn.support.angleDeg = supAngleTransform(nn.support.angleDeg||0); }
     if(nn.force){
       if(nn.force.mode==='components'){
         const v=vecFn(nn.force.Fx||0, nn.force.Fy||0);
@@ -6510,8 +7417,10 @@ function openCopyRotateForm(){
   closeAllInlineForms();
   if(wasOpen){ renderSidebar(); return; }
   copyRotateFormOpen=true;
-  const ids=new Set(); selectedElements().forEach(e=>{ ids.add(e.n1); ids.add(e.n2); });
-  setTransformDefaults(Array.from(ids),'rotate');
+  if(!rotInitialized){
+    const ids=new Set(); selectedElements().forEach(e=>{ ids.add(e.n1); ids.add(e.n2); });
+    setTransformDefaults(Array.from(ids),'rotate');
+  }
   renderSidebar();
 }
 function closeCopyRotateForm(){ copyRotateFormOpen=false; renderSidebar(); }
@@ -6540,8 +7449,10 @@ function openCopyMirrorForm(){
   closeAllInlineForms();
   if(wasOpen){ renderSidebar(); return; }
   copyMirrorFormOpen=true;
-  const ids=new Set(); selectedElements().forEach(e=>{ ids.add(e.n1); ids.add(e.n2); });
-  setTransformDefaults(Array.from(ids),'mirror');
+  if(!mirInitialized){
+    const ids=new Set(); selectedElements().forEach(e=>{ ids.add(e.n1); ids.add(e.n2); });
+    setTransformDefaults(Array.from(ids),'mirror');
+  }
   renderSidebar();
 }
 function closeCopyMirrorForm(){ copyMirrorFormOpen=false; renderSidebar(); }
@@ -6557,7 +7468,8 @@ function confirmCopyMirror(){
     (x,y)=>mirrorPoint(x,y,x1,y1,x2,y2),
     a=>normalizeAngle(2*phiDeg-a),
     (fx,fy)=>mirrorVectorComponents(fx,fy,phiRad),
-    true
+    true,
+    a=>normalizeAngle(2*phiDeg-a+180)
   );
   if(!res){ closeCopyMirrorForm(); return; }
   copyMirrorFormOpen=false;
@@ -6576,7 +7488,9 @@ function openNodeRotateForm(){
   closeAllInlineForms();
   if(wasOpen){ renderSidebar(); return; }
   nodeRotateFormOpen=true;
-  setTransformDefaults(selectedNodes().map(n=>n.id),'rotate');
+  if(!rotInitialized){
+    setTransformDefaults(selectedNodes().map(n=>n.id),'rotate');
+  }
   renderSidebar();
 }
 function closeNodeRotateForm(){ nodeRotateFormOpen=false; renderSidebar(); }
@@ -6617,7 +7531,9 @@ function openNodeMirrorForm(){
   closeAllInlineForms();
   if(wasOpen){ renderSidebar(); return; }
   nodeMirrorFormOpen=true;
-  setTransformDefaults(selectedNodes().map(n=>n.id),'mirror');
+  if(!mirInitialized){
+    setTransformDefaults(selectedNodes().map(n=>n.id),'mirror');
+  }
   renderSidebar();
 }
 function closeNodeMirrorForm(){ nodeMirrorFormOpen=false; renderSidebar(); }
@@ -6634,7 +7550,7 @@ function confirmNodeMirror(){
     const n=getNode(id); if(!n) return;
     const p=mirrorPoint(n.x,n.y,x1,y1,x2,y2);
     n.x=Math.round(p.x*1e6)/1e6; n.y=Math.round(p.y*1e6)/1e6;
-    if(n.support){ n.support.angleDeg=normalizeAngle(2*phiDeg-(n.support.angleDeg||0)); }
+    if(n.support){ n.support.angleDeg=normalizeAngle(2*phiDeg-(n.support.angleDeg||0)+180); }
     if(n.force){
       if(n.force.mode==='components'){
         const v=mirrorVectorComponents(n.force.Fx||0,n.force.Fy||0,phiRad);
@@ -7137,7 +8053,7 @@ function panelHarmonicResults(){
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed var(--surface-border-soft);">
         <span style="color:var(--text-dim);font-size:11px;">Wpływ grawitacji:</span>
-        <span class="tag" style="font-size:10px;${hasG ? 'background:var(--ok-bg);color:var(--ok);font-weight:600;' : ''}">${hasG ? 'AKTYWNY (g = 9.81 m/s² ↓)' : 'Wyłączony'}</span>
+        <span class="tag" style="font-size:10px;${hasG ? 'background:var(--ok-bg);color:var(--ok-fg);border:1px solid var(--ok-border);font-weight:600;' : ''}">${hasG ? 'AKTYWNY (g = 9.81 m/s² ↓)' : 'Wyłączony'}</span>
       </div>
     </div>
   </div>
@@ -7561,21 +8477,48 @@ function probeReadoutHtml(){
 
   if(solved.type === 'influence'){
     const dg = ilDg(probe.elId);
+    if(!dg) return '<div class="muted">Brak danych dla tego pręta.</div>';
     const x = probe.t*dg.L;
     const prN = FEM.pointResults(solved.byType.N.results[idx], x);
     const prT = FEM.pointResults(solved.byType.T.results[idx], x);
     const prM = FEM.pointResults(solved.byType.M.results[idx], x);
-    return `<div class="probeval">
-      <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
-      <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
-      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
-      <div><span class="k">Rzędna l.w. N (—)</span><span class="v">${fmt(prN.v_local,4)}</span></div>
-      <div><span class="k">Rzędna l.w. T (—)</span><span class="v">${fmt(prT.v_local,4)}</span></div>
-      <div><span class="k">Rzędna l.w. M (m)</span><span class="v">${fmt(prM.v_local,4)}</span></div>
-    </div>`;
+
+    return `
+    <div style="display:flex;justify-content:space-between;margin:6px 0 4px 0;font-size:11.5px;color:var(--text-dim);">
+      <span>Pozycja x: <strong style="color:var(--text);font-family:var(--mono);">${fmt(x,3)} m</strong></span>
+      <span>Długość L: <strong style="color:var(--text);font-family:var(--mono);">${fmt(dg.L,3)} m</strong></span>
+    </div>
+    <table class="probetable">
+      <thead>
+        <tr>
+          <th>Linia wpływu</th>
+          <th style="color:var(--text);text-align:right;">Rzędna η</th>
+          <th style="color:var(--text-dim);text-align:right;width:45px;">Jedn.</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="swatch" style="background:var(--m-color);"></span><strong>η_M</strong> <span class="muted">moment zginający</span></td>
+          <td style="color:var(--m-color);font-weight:600;">${fmt(prM.v_local,4)}</td>
+          <td class="muted">m</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--t-color);"></span><strong>η_T</strong> <span class="muted">siła tnąca</span></td>
+          <td style="color:var(--t-color);font-weight:600;">${fmt(prT.v_local,4)}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--n-color);"></span><strong>η_N</strong> <span class="muted">siła osiowa</span></td>
+          <td style="color:var(--n-color);font-weight:600;">${fmt(prN.v_local,4)}</td>
+          <td class="muted">—</td>
+        </tr>
+      </tbody>
+    </table>`;
   }
 
-  const dg=diagrams[probe.elId]; const x=probe.t*dg.L;
+  const dg=diagrams && diagrams[probe.elId];
+  if(!dg) return '<div class="muted">Brak danych dla tego pręta.</div>';
+  const x=probe.t*dg.L;
 
   if(solved.type === 'stability'){
     const mode = solved.modes[solved.currentMode || 0];
@@ -7596,22 +8539,65 @@ function probeReadoutHtml(){
       sigTop: rawPr.sigTop * sign,
       sigBot: rawPr.sigBot * sign
     };
-    return `<div class="probeval">
-      <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
-      <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
-      <div><span class="k">Ux modalne (znormaliz.)</span><span class="v">${fmt(pr.Ux_global,3)}</span></div>
-      <div><span class="k">Uy modalne (znormaliz.)</span><span class="v">${fmt(pr.Uy_global,3)}</span></div>
-      <div><span class="k">u lokalne (osiowe)</span><span class="v">${fmt(pr.u_local,3)}</span></div>
-      <div><span class="k">v lokalne (poprzeczne)</span><span class="v">${fmt(pr.v_local,3)}</span></div>
-      <div><span class="k">Obrót θ modalny</span><span class="v">${fmt(pr.theta,3)}</span></div>
-      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
-      <div><span class="k">Siła osiowa N_cr</span><span class="v">${fmt(pr.N,3)} kN</span></div>
-      <div><span class="k">Siła tnąca T_cr</span><span class="v">${fmt(pr.V,3)} kN</span></div>
-      <div><span class="k">Moment zginający M_cr</span><span class="v">${fmt(pr.M,3)} kNm</span></div>
-      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
-      <div><span class="k">Naprężenie σ_cr góra</span><span class="v">${fmt(pr.sigTop/1000,2)} MPa</span></div>
-      <div><span class="k">Naprężenie σ_cr dół</span><span class="v">${fmt(pr.sigBot/1000,2)} MPa</span></div>
-    </div>`;
+
+    return `
+    <div style="display:flex;justify-content:space-between;margin:6px 0 4px 0;font-size:11.5px;color:var(--text-dim);">
+      <span>Pozycja x: <strong style="color:var(--text);font-family:var(--mono);">${fmt(x,3)} m</strong></span>
+      <span>Długość L: <strong style="color:var(--text);font-family:var(--mono);">${fmt(dg.L,3)} m</strong></span>
+    </div>
+    <table class="probetable">
+      <thead>
+        <tr>
+          <th>Wielkość <span style="font-weight:normal;color:var(--text-dim);">(Mod #${(solved.currentMode||0)+1})</span></th>
+          <th style="color:var(--text);text-align:right;">Wartość</th>
+          <th style="color:var(--text-dim);text-align:right;width:45px;">Jedn.</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="section-head"><td colspan="3">Forma wyboczenia (znormalizowana)</td></tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--def-color);"></span><strong>v</strong> <span class="muted">poprzeczne</span></td>
+          <td style="color:var(--def-color);font-weight:600;">${fmt(pr.v_local,3)}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--def-color);"></span><strong>u</strong> <span class="muted">osiowe</span></td>
+          <td>${fmt(pr.u_local,3)}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--text-dim);"></span><strong>Ux / Uy</strong> <span class="muted">globalne</span></td>
+          <td>${fmt(pr.Ux_global,3)} / ${fmt(pr.Uy_global,3)}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--accent-dark);"></span><strong>θ</strong> <span class="muted">obrót modalny</span></td>
+          <td>${fmt(pr.theta,3)}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr class="section-head"><td colspan="3">Siły i naprężenia krytyczne</td></tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--m-color);"></span><strong>M_cr</strong> <span class="muted">zginający</span></td>
+          <td style="color:var(--m-color);font-weight:600;">${fmt(pr.M,3)}</td>
+          <td class="muted">kNm</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--t-color);"></span><strong>T_cr</strong> <span class="muted">tnąca</span></td>
+          <td style="color:var(--t-color);font-weight:600;">${fmt(pr.V,3)}</td>
+          <td class="muted">kN</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--n-color);"></span><strong>N_cr</strong> <span class="muted">osiowa</span></td>
+          <td style="color:var(--n-color);font-weight:600;">${fmt(pr.N,3)}</td>
+          <td class="muted">kN</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--s-color);"></span><strong>σ_cr góra / dół</strong></td>
+          <td>${fmt(pr.sigTop/1000,2)} / ${fmt(pr.sigBot/1000,2)}</td>
+          <td class="muted">MPa</td>
+        </tr>
+      </tbody>
+    </table>`;
   }
 
   if(solved.type === 'modal'){
@@ -7631,36 +8617,76 @@ function probeReadoutHtml(){
       sigTop: rawPr.sigTop * sign,
       sigBot: rawPr.sigBot * sign
     };
-    return `<div class="probeval">
-      <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
-      <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
-      <div><span class="k">Ux modalne (znormaliz.)</span><span class="v">${fmt(pr.Ux_global,3)}</span></div>
-      <div><span class="k">Uy modalne (znormaliz.)</span><span class="v">${fmt(pr.Uy_global,3)}</span></div>
-      <div><span class="k">u lokalne (osiowe)</span><span class="v">${fmt(pr.u_local,3)}</span></div>
-      <div><span class="k">v lokalne (poprzeczne)</span><span class="v">${fmt(pr.v_local,3)}</span></div>
-      <div><span class="k">Obrót θ modalny</span><span class="v">${fmt(pr.theta,3)}</span></div>
-      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
-      <div><span class="k">Siła osiowa N_mod</span><span class="v">${fmt(pr.N,3)} kN</span></div>
-      <div><span class="k">Siła tnąca T_mod</span><span class="v">${fmt(pr.V,3)} kN</span></div>
-      <div><span class="k">Moment zginający M_mod</span><span class="v">${fmt(pr.M,3)} kNm</span></div>
-      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
-      <div><span class="k">Naprężenie σ_mod góra</span><span class="v">${fmt(pr.sigTop/1000,2)} MPa</span></div>
-      <div><span class="k">Naprężenie σ_mod dół</span><span class="v">${fmt(pr.sigBot/1000,2)} MPa</span></div>
-    </div>`;
+
+    return `
+    <div style="display:flex;justify-content:space-between;margin:6px 0 4px 0;font-size:11.5px;color:var(--text-dim);">
+      <span>Pozycja x: <strong style="color:var(--text);font-family:var(--mono);">${fmt(x,3)} m</strong></span>
+      <span>Długość L: <strong style="color:var(--text);font-family:var(--mono);">${fmt(dg.L,3)} m</strong></span>
+    </div>
+    <table class="probetable">
+      <thead>
+        <tr>
+          <th>Wielkość <span style="font-weight:normal;color:var(--text-dim);">(Mod #${(solved.currentMode||0)+1})</span></th>
+          <th style="color:var(--text);text-align:right;">Wartość</th>
+          <th style="color:var(--text-dim);text-align:right;width:45px;">Jedn.</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="section-head"><td colspan="3">Forma drgań własnych (znormalizowana)</td></tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--def-color);"></span><strong>v</strong> <span class="muted">poprzeczne</span></td>
+          <td style="color:var(--def-color);font-weight:600;">${fmt(pr.v_local,3)}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--def-color);"></span><strong>u</strong> <span class="muted">osiowe</span></td>
+          <td>${fmt(pr.u_local,3)}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--text-dim);"></span><strong>Ux / Uy</strong> <span class="muted">globalne</span></td>
+          <td>${fmt(pr.Ux_global,3)} / ${fmt(pr.Uy_global,3)}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--accent-dark);"></span><strong>θ</strong> <span class="muted">obrót modalny</span></td>
+          <td>${fmt(pr.theta,3)}</td>
+          <td class="muted">—</td>
+        </tr>
+        <tr class="section-head"><td colspan="3">Siły i naprężenia modalne</td></tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--m-color);"></span><strong>M_mod</strong> <span class="muted">zginający</span></td>
+          <td style="color:var(--m-color);font-weight:600;">${fmt(pr.M,3)}</td>
+          <td class="muted">kNm</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--t-color);"></span><strong>T_mod</strong> <span class="muted">tnąca</span></td>
+          <td style="color:var(--t-color);font-weight:600;">${fmt(pr.V,3)}</td>
+          <td class="muted">kN</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--n-color);"></span><strong>N_mod</strong> <span class="muted">osiowa</span></td>
+          <td style="color:var(--n-color);font-weight:600;">${fmt(pr.N,3)}</td>
+          <td class="muted">kN</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--s-color);"></span><strong>σ_mod góra / dół</strong></td>
+          <td>${fmt(pr.sigTop/1000,2)} / ${fmt(pr.sigBot/1000,2)}</td>
+          <td class="muted">MPa</td>
+        </tr>
+      </tbody>
+    </table>`;
   }
 
   if(solved.type === 'harmonic'){
     const staticEdRes = solved.staticSol ? solved.staticSol.results[idx] : null;
     const dynEdRes = solved.dynSol ? solved.dynSol.results[idx] : null;
     const gravEdRes = solved.gravSol ? solved.gravSol.results[idx] : null;
-
     const prStat = staticEdRes ? FEM.pointResults(staticEdRes, x) : { N:0, V:0, M:0, u_local:0, v_local:0, theta:0, Ux_global:0, Uy_global:0, sigTop:0, sigBot:0 };
     const prHarm = dynEdRes ? FEM.pointResults(dynEdRes, x) : { N:0, V:0, M:0, u_local:0, v_local:0, theta:0, Ux_global:0, Uy_global:0, sigTop:0, sigBot:0 };
     const prGrav = gravEdRes ? FEM.pointResults(gravEdRes, x) : null;
-
     const cfg = HARMONIC_COMBS[solved.combKey || 'stat_plus_dyn'] || HARMONIC_COMBS['stat_plus_dyn'];
     const sStat = cfg.sStat, sInertia = cfg.sInertia, sGrav = cfg.sGrav;
-
     function combVal(key){
       const vStat = prStat[key] || 0;
       const vHarm = prHarm[key] || 0;
@@ -7668,7 +8694,6 @@ function probeReadoutHtml(){
       const vGrav = (sGrav && prGrav) ? (prGrav[key] || 0) : 0;
       return sStat * vStat + sInertia * vInert + vGrav;
     }
-
     const pr = {
       x,
       N: combVal('N'),
@@ -7683,42 +8708,136 @@ function probeReadoutHtml(){
       sigBot: combVal('sigBot')
     };
 
-    return `<div class="probeval">
-      <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
-      <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
-      <div><span class="k">Ux (${cfg.shortName})</span><span class="v">${fmt(pr.Ux_global*1000,2)} mm</span></div>
-      <div><span class="k">Uy (${cfg.shortName})</span><span class="v">${fmt(pr.Uy_global*1000,2)} mm</span></div>
-      <div><span class="k">u (lokalne, osiowe)</span><span class="v">${fmt(pr.u_local*1000,2)} mm</span></div>
-      <div><span class="k">v (lokalne, poprzeczne)</span><span class="v">${fmt(pr.v_local*1000,2)} mm</span></div>
-      <div><span class="k">Obrót θ</span><span class="v">${fmt(pr.theta*1000,3)} mrad</span></div>
-      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
-      <div><span class="k">Siła osiowa N</span><span class="v">${fmt(pr.N,3)} kN</span></div>
-      <div><span class="k">Siła tnąca T</span><span class="v">${fmt(pr.V,3)} kN</span></div>
-      <div><span class="k">Moment zginający M</span><span class="v">${fmt(pr.M,3)} kNm</span></div>
-      <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
-      <div><span class="k">Naprężenie σ góra</span><span class="v">${fmt(pr.sigTop/1000,2)} MPa</span></div>
-      <div><span class="k">Naprężenie σ dół</span><span class="v">${fmt(pr.sigBot/1000,2)} MPa</span></div>
-    </div>`;
+    return `
+    <div style="display:flex;justify-content:space-between;margin:6px 0 4px 0;font-size:11.5px;color:var(--text-dim);">
+      <span>Pozycja x: <strong style="color:var(--text);font-family:var(--mono);">${fmt(x,3)} m</strong></span>
+      <span>Długość L: <strong style="color:var(--text);font-family:var(--mono);">${fmt(dg.L,3)} m</strong></span>
+    </div>
+    <table class="probetable">
+      <thead>
+        <tr>
+          <th>Wielkość <span style="font-weight:normal;color:var(--text-dim);">(${cfg.shortName})</span></th>
+          <th style="color:var(--text);text-align:right;">Wartość</th>
+          <th style="color:var(--text-dim);text-align:right;width:45px;">Jedn.</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="section-head"><td colspan="3">Siły przekrojowe i naprężenia</td></tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--m-color);"></span><strong>M</strong> <span class="muted">zginający</span></td>
+          <td style="color:var(--m-color);font-weight:600;">${fmt(pr.M,3)}</td>
+          <td class="muted">kNm</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--t-color);"></span><strong>T</strong> <span class="muted">tnąca</span></td>
+          <td style="color:var(--t-color);font-weight:600;">${fmt(pr.V,3)}</td>
+          <td class="muted">kN</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--n-color);"></span><strong>N</strong> <span class="muted">osiowa</span></td>
+          <td style="color:var(--n-color);font-weight:600;">${fmt(pr.N,3)}</td>
+          <td class="muted">kN</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--s-color);"></span><strong>σ góra</strong></td>
+          <td style="color:var(--s-color);font-weight:600;">${fmt(pr.sigTop/1000,2)}</td>
+          <td class="muted">MPa</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--s-color);"></span><strong>σ dół</strong></td>
+          <td style="color:var(--s-color);font-weight:600;">${fmt(pr.sigBot/1000,2)}</td>
+          <td class="muted">MPa</td>
+        </tr>
+        <tr class="section-head"><td colspan="3">Przemieszczenia i obrót</td></tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--def-color);"></span><strong>v</strong> <span class="muted">poprzeczne</span></td>
+          <td style="color:var(--def-color);font-weight:600;">${fmt(pr.v_local*1000,2)}</td>
+          <td class="muted">mm</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--def-color);"></span><strong>u</strong> <span class="muted">osiowe</span></td>
+          <td>${fmt(pr.u_local*1000,2)}</td>
+          <td class="muted">mm</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--text-dim);"></span><strong>Ux / Uy</strong> <span class="muted">globalne</span></td>
+          <td>${fmt(pr.Ux_global*1000,2)} / ${fmt(pr.Uy_global*1000,2)}</td>
+          <td class="muted">mm</td>
+        </tr>
+        <tr>
+          <td><span class="swatch" style="background:var(--accent-dark);"></span><strong>θ</strong> <span class="muted">obrót przekroju</span></td>
+          <td>${fmt(pr.theta*1000,3)}</td>
+          <td class="muted">mrad</td>
+        </tr>
+      </tbody>
+    </table>`;
   }
 
   const edRes = solved.results[idx];
   const pr = FEM.pointResults(edRes,x);
-  return `<div class="probeval">
-    <div><span class="k">x wzdłuż pręta</span><span class="v">${fmt(x,3)} m</span></div>
-    <div><span class="k">Długość pręta</span><span class="v">${fmt(dg.L,3)} m</span></div>
-    <div><span class="k">Ux (globalne)</span><span class="v">${fmt(pr.Ux_global*1000,2)} mm</span></div>
-    <div><span class="k">Uy (globalne)</span><span class="v">${fmt(pr.Uy_global*1000,2)} mm</span></div>
-    <div><span class="k">u (lokalne, osiowe)</span><span class="v">${fmt(pr.u_local*1000,2)} mm</span></div>
-    <div><span class="k">v (lokalne, poprzeczne)</span><span class="v">${fmt(pr.v_local*1000,2)} mm</span></div>
-    <div><span class="k">Obrót θ</span><span class="v">${fmt(pr.theta*1000,3)} mrad</span></div>
-    <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
-    <div><span class="k">Siła osiowa N</span><span class="v">${fmt(pr.N,3)} kN</span></div>
-    <div><span class="k">Siła tnąca T</span><span class="v">${fmt(pr.V,3)} kN</span></div>
-    <div><span class="k">Moment zginający M</span><span class="v">${fmt(pr.M,3)} kNm</span></div>
-    <div><span class="k">&nbsp;</span><span class="v">&nbsp;</span></div>
-    <div><span class="k">Naprężenie σ góra</span><span class="v">${fmt(pr.sigTop/1000,2)} MPa</span></div>
-    <div><span class="k">Naprężenie σ dół</span><span class="v">${fmt(pr.sigBot/1000,2)} MPa</span></div>
-  </div>`;
+  return `
+  <div style="display:flex;justify-content:space-between;margin:6px 0 4px 0;font-size:11.5px;color:var(--text-dim);">
+    <span>Pozycja x: <strong style="color:var(--text);font-family:var(--mono);">${fmt(x,3)} m</strong></span>
+    <span>Długość L: <strong style="color:var(--text);font-family:var(--mono);">${fmt(dg.L,3)} m</strong></span>
+  </div>
+  <table class="probetable">
+    <thead>
+      <tr>
+        <th>Wielkość</th>
+        <th style="color:var(--text);text-align:right;">Wartość</th>
+        <th style="color:var(--text-dim);text-align:right;width:45px;">Jedn.</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="section-head"><td colspan="3">Siły przekrojowe i naprężenia</td></tr>
+      <tr>
+        <td><span class="swatch" style="background:var(--m-color);"></span><strong>M</strong> <span class="muted">zginający</span></td>
+        <td style="color:var(--m-color);font-weight:600;">${fmt(pr.M,3)}</td>
+        <td class="muted">kNm</td>
+      </tr>
+      <tr>
+        <td><span class="swatch" style="background:var(--t-color);"></span><strong>T</strong> <span class="muted">tnąca</span></td>
+        <td style="color:var(--t-color);font-weight:600;">${fmt(pr.V,3)}</td>
+        <td class="muted">kN</td>
+      </tr>
+      <tr>
+        <td><span class="swatch" style="background:var(--n-color);"></span><strong>N</strong> <span class="muted">osiowa</span></td>
+        <td style="color:var(--n-color);font-weight:600;">${fmt(pr.N,3)}</td>
+        <td class="muted">kN</td>
+      </tr>
+      <tr>
+        <td><span class="swatch" style="background:var(--s-color);"></span><strong>σ góra</strong></td>
+        <td style="color:var(--s-color);font-weight:600;">${fmt(pr.sigTop/1000,2)}</td>
+        <td class="muted">MPa</td>
+      </tr>
+      <tr>
+        <td><span class="swatch" style="background:var(--s-color);"></span><strong>σ dół</strong></td>
+        <td style="color:var(--s-color);font-weight:600;">${fmt(pr.sigBot/1000,2)}</td>
+        <td class="muted">MPa</td>
+      </tr>
+      <tr class="section-head"><td colspan="3">Przemieszczenia i obrót</td></tr>
+      <tr>
+        <td><span class="swatch" style="background:var(--def-color);"></span><strong>v</strong> <span class="muted">poprzeczne</span></td>
+        <td style="color:var(--def-color);font-weight:600;">${fmt(pr.v_local*1000,2)}</td>
+        <td class="muted">mm</td>
+      </tr>
+      <tr>
+        <td><span class="swatch" style="background:var(--def-color);"></span><strong>u</strong> <span class="muted">osiowe</span></td>
+        <td>${fmt(pr.u_local*1000,2)}</td>
+        <td class="muted">mm</td>
+      </tr>
+      <tr>
+        <td><span class="swatch" style="background:var(--text-dim);"></span><strong>Ux / Uy</strong> <span class="muted">globalne</span></td>
+        <td>${fmt(pr.Ux_global*1000,2)} / ${fmt(pr.Uy_global*1000,2)}</td>
+        <td class="muted">mm</td>
+      </tr>
+      <tr>
+        <td><span class="swatch" style="background:var(--accent-dark);"></span><strong>θ</strong> <span class="muted">obrót przekroju</span></td>
+        <td>${fmt(pr.theta*1000,3)}</td>
+        <td class="muted">mrad</td>
+      </tr>
+    </tbody>
+  </table>`;
 }
 function setProbeElement(id){ probe.elId=id; probe.t=0.5; renderSidebar(); render(); }
 function setProbeT(t){
@@ -7743,19 +8862,14 @@ function sectionAsymNote(s){
 function toggleLibraryCollapse(){ libraryCollapsed=!libraryCollapsed; renderSidebar(); }
 function panelLibrary(){
   return `<div class="panel">
-    <h3 class="collapsible-head" onclick="toggleLibraryCollapse()">Biblioteka <span class="subtle-icon">${libraryCollapsed?'▸':'▾'}</span></h3>
-    <div id="libBody" style="${libraryCollapsed?'display:none;':''}">
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:6px;font-size:11.5px;color:var(--text-dim);">MATERIAŁY</div>
-        ${materials.map(m=>`<div class="listitem"><span>${m.name}<br><span class="muted">E=${m.E} GPa, α=${m.alpha}·10⁻⁵/°C, ρ=${m.density||0} kg/m³</span></span><span class="del" onclick="removeMaterial(${m.id})" title="Usuń">✕</span></div>`).join('')}
-        ${addMatFormOpen? addMatFormHtml() : `<div class="btnrow"><button class="mini" onclick="openAddMatForm()">+ Dodaj materiał</button></div>`}
-      </div>
-      <div class="card">
-        <div style="font-weight:600;margin-bottom:6px;font-size:11.5px;color:var(--text-dim);">PRZEKROJE</div>
-        ${sections.map(s=>`<div class="listitem"><span>${s.name}<br><span class="muted">A=${fmtSmart(s.A)} cm², I=${fmtSmart(s.I)} cm⁴${sectionAsymNote(s)}</span></span><span class="del" onclick="removeSection(${s.id})" title="Usuń">✕</span></div>`).join('')}
-        ${addSecFormOpen? addSecFormHtml() : `<div class="btnrow"><button class="mini" onclick="openAddSecForm()">+ Dodaj przekrój</button></div>`}
-      </div>
-    </div>
+    <h3>Materiały <span class="tag">${materials.length}</span></h3>
+    ${materials.map(m=>`<div class="listitem"><span>${m.name}<br><span class="muted">E=${m.E} GPa, α=${m.alpha}·10⁻⁵/°C, ρ=${m.density||0} kg/m³</span></span><span class="del" onclick="removeMaterial(${m.id})" title="Usuń">✕</span></div>`).join('')}
+    ${addMatFormOpen? addMatFormHtml() : `<div class="btnrow"><button class="mini" onclick="openAddMatForm()">+ Dodaj materiał</button></div>`}
+  </div>
+  <div class="panel">
+    <h3>Przekroje <span class="tag">${sections.length}</span></h3>
+    ${sections.map(s=>`<div class="listitem"><span>${s.name}<br><span class="muted">A=${fmtSmart(s.A)} cm², I=${fmtSmart(s.I)} cm⁴${sectionAsymNote(s)}</span></span><span class="del" onclick="removeSection(${s.id})" title="Usuń">✕</span></div>`).join('')}
+    ${addSecFormOpen? addSecFormHtml() : `<div class="btnrow"><button class="mini" onclick="openAddSecForm()">+ Dodaj przekrój</button></div>`}
   </div>`;
 }
 function openAddMatForm(){ addMatFormOpen=true; renderSidebar(); }
