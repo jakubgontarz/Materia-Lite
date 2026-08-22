@@ -80,8 +80,10 @@
     border-bottom:1px solid #0d141d;
     z-index:20;
   }
-  .tb-group{display:inline-flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid #364353;vertical-align:top;margin-bottom:4px;}
+  .tb-group{display:inline-flex;align-items:center;gap:2px;padding:0 6px;border-right:1px solid #364353;vertical-align:middle;margin-bottom:4px;}
   .tb-group:last-child{border-right:none;}
+  .tb-cluster{display:inline-flex;align-items:center;vertical-align:middle;margin-bottom:4px;}
+  .tb-cluster .tb-group{margin-bottom:0;}
   .tb-group-run{float:right;border-right:none !important;padding:0 0 0 6px !important;margin-bottom:4px;}
   .tb-btn{
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
@@ -98,8 +100,8 @@
   .tb-btn.primary:hover{background:var(--accent-dark);}
   .tb-sep{width:1px;align-self:stretch;background:#364353;margin:0 4px;}
   .tb-select{background:#2a3644;color:var(--toolbar-fg);border:1px solid #3d4c5e;border-radius:5px;
-    font-size:11px;padding:4px 6px;max-width:150px;}
-  .tb-label{font-size:9.5px;color:#9fb0c3;text-transform:uppercase;letter-spacing:.04em;margin-right:2px;}
+    font-size:11px;padding:4px 6px;max-width:150px;vertical-align:middle;}
+  .tb-label{font-size:9.5px;color:#9fb0c3;text-transform:uppercase;letter-spacing:.04em;margin-right:2px;vertical-align:middle;}
 
   /* ---------- Main layout ---------- */
   #main{flex:1;display:flex;min-height:0;}
@@ -200,9 +202,12 @@
        wysokości — większy, wygodniejszy cel dotyku niż sam mały uchwyt. */
     #statusbar{ touch-action:none;cursor:grab;cursor:row-resize;-webkit-user-select:none;user-select:none; }
     .tb-btn span{display:none;}
-    .tb-btn{min-width:auto;padding:7px 8px;}
+    .tb-btn{min-width:32px;min-height:32px;padding:6px 6px;border-radius:8px;}
+    .tb-btn svg{width:22px;height:22px;}
     .tb-label{display:none;}
-    .tb-select{max-width:96px;}
+    .tb-select{max-width:110px;font-size:11.5px;padding:4px 6px;height:28px;align-self:center;}
+    button.mini-icon{width:36px;height:36px;min-width:36px;min-height:36px;border-radius:8px;}
+    button.mini-icon svg{width:22px;height:22px;}
   }
 
   .panel{border-bottom:8px solid var(--panel-gutter);padding:12px 14px;}
@@ -227,7 +232,7 @@
     font-size:12px;font-family:var(--mono);background:var(--input-bg);color:var(--text);}
   .row-pair .half .unit{color:#8b98a7;font-size:10px;flex:0 0 auto;}
   .nudgebtn{padding:4px 8px !important;font-size:10.5px !important;}
-  .btnrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}
+  .btnrow{display:flex;gap:3px;flex-wrap:wrap;margin-top:6px;}
   button.mini{
     background:var(--surface);border:1px solid var(--input-border);border-radius:6px;padding:5px 9px;font-size:11px;cursor:pointer;color:var(--text);
   }
@@ -235,8 +240,8 @@
   button.mini.on{background:var(--accent);border-color:var(--accent-dark);color:#fff;}
   button.mini.danger{color:var(--danger);}
   button.mini.danger:hover{background:#fee2e2;border-color:var(--danger);}
-  button.mini-icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:28px;padding:0;flex:0 0 auto;}
-  button.mini-icon svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;}
+  button.mini-icon{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;padding:0;border-radius:8px;flex:0 0 auto;}
+  button.mini-icon svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;}
   button.mini-icon.on svg{stroke:#fff;}
   button.primary-btn{background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px 12px;
     font-size:12.5px;font-weight:600;cursor:pointer;width:100%;}
@@ -4996,24 +5001,27 @@ function buildToolbar(){
       <button class="tb-btn" id="btnOptions" title="Opcje programu">${ICONS.gear}<span>Opcje</span></button>
       <input type="file" id="fileImport" accept="application/json" style="display:none;">
     </div>
-    <!-- Grupa 2: Zaznacz i Rysuj -->
-    <div class="tb-group">
-      <button class="tb-btn" data-mode="select" title="Zaznacz / przesuń (V)">${ICONS.select}<span>Zaznacz</span></button>
-      <button class="tb-btn" data-mode="addBar" title="Rysuj pręt / węzeł (R / B)">${ICONS.bar}<span>Rysuj</span></button>
+    <!-- Klaster 3 grup (Zaznacz/Rysuj + Przekrój/Materiał + Przełączniki) — przenoszą się razem jako jeden blok -->
+    <div class="tb-cluster">
+      <!-- Grupa 2: Zaznacz i Rysuj -->
+      <div class="tb-group">
+        <button class="tb-btn" data-mode="select" title="Zaznacz / przesuń (V)">${ICONS.select}<span>Zaznacz</span></button>
+        <button class="tb-btn" data-mode="addBar" title="Rysuj pręt / węzeł (R / B)">${ICONS.bar}<span>Rysuj</span></button>
+      </div>
+      <!-- Grupa 3: Przekrój i Materiał -->
+      <div class="tb-group" ${!hasToggles ? 'style="border-right:none;"' : ''}>
+        <span class="tb-label">Przekrój</span>
+        <select id="defSectionSel" class="tb-select"></select>
+        <span class="tb-label">Materiał</span>
+        <select id="defMaterialSel" class="tb-select"></select>
+      </div>
+      <!-- Grupa 4: Przełączniki (Przyciągaj, Ramka, Auto-węzeł) -->
+      ${hasToggles ? `<div class="tb-group" style="border-right:none;">
+        ${showSnapToggle ? `<button class="tb-btn ${snapEnabled?'active':''}" id="snapToggleBtn" title="Przyciąganie do siatki (${snapSize} m)">${ICONS.grid}<span>Przyciągaj</span></button>` : ''}
+        ${showBoxSelectToggle ? `<button class="tb-btn ${boxSelectEnabled?'active':''}" id="boxSelectToggleBtn" title="Zaznaczanie ramką — gdy włączone, przeciągnięcie po pustym miejscu rysuje ramkę zaznaczenia zamiast przewijać widok">${ICONS.boxselect}<span>Ramka</span></button>` : ''}
+        ${showNewNodesToggle ? `<button class="tb-btn ${allowNewNodesInBarMode?'active':''}" id="newNodesToggleBtn" title="Twórz nowe węzły podczas rysowania pręta">${ICONS.node}<span>Auto-węzeł</span></button>` : ''}
+      </div>` : ''}
     </div>
-    <!-- Grupa 3: Przekrój i Materiał -->
-    <div class="tb-group" ${!hasToggles ? 'style="border-right:none;"' : ''}>
-      <span class="tb-label">Przekrój</span>
-      <select id="defSectionSel" class="tb-select"></select>
-      <span class="tb-label">Materiał</span>
-      <select id="defMaterialSel" class="tb-select"></select>
-    </div>
-    <!-- Grupa 4: Przełączniki (Przyciągaj, Ramka, Auto-węzeł) -->
-    ${hasToggles ? `<div class="tb-group" style="border-right:none;">
-      ${showSnapToggle ? `<button class="tb-btn ${snapEnabled?'active':''}" id="snapToggleBtn" title="Przyciąganie do siatki (${snapSize} m)">${ICONS.grid}<span>Przyciągaj</span></button>` : ''}
-      ${showBoxSelectToggle ? `<button class="tb-btn ${boxSelectEnabled?'active':''}" id="boxSelectToggleBtn" title="Zaznaczanie ramką — gdy włączone, przeciągnięcie po pustym miejscu rysuje ramkę zaznaczenia zamiast przewijać widok">${ICONS.boxselect}<span>Ramka</span></button>` : ''}
-      ${showNewNodesToggle ? `<button class="tb-btn ${allowNewNodesInBarMode?'active':''}" id="newNodesToggleBtn" title="Twórz nowe węzły podczas rysowania pręta">${ICONS.node}<span>Auto-węzeł</span></button>` : ''}
-    </div>` : ''}
   `;
   tb.querySelectorAll('[data-mode]').forEach(b=>{
     b.addEventListener('click', ()=>setMode(b.dataset.mode));
