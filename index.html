@@ -5447,9 +5447,6 @@ function openAboutModal(){
           </div>
         </div>
       </div>
-      <div style="padding:12px 20px 16px;border-top:1px solid var(--sidebar-border);display:flex;justify-content:flex-end;">
-        <button id="aboutOkBtn" class="primary-btn" style="width:auto;padding:6px 20px;font-size:12px;">Zamknij</button>
-      </div>
     </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener('click',(e)=>{ if(e.target===overlay) closeAboutModal(); });
