@@ -4578,6 +4578,7 @@ function drawSegmentDimensionPoints(pa, pb, lengthMeters){
   if(!pa || !pb) return;
   const dx=pb.x-pa.x, dy=pb.y-pa.y;
   const segLen=Math.hypot(dx,dy)||1;
+  if(segLen < 15) return; // Zapobieganie rysowaniu skompresowanych linii wymiarowych dla znikomo małych odcinków
   const ux=dx/segLen, uy=dy/segLen;
   const nx=-uy, ny=ux; // kierunek prostopadły w przestrzeni ekranu
   const offset=24;
@@ -4799,14 +4800,15 @@ function drawTransientOverlays(){
         if(hn){ targetX=hn.x; targetY=hn.y; }
       }
       const pb=toScreen(targetX,targetY);
+      const pixelDist=Math.hypot(pb.x-pa.x, pb.y-pa.y);
       const dist=Math.hypot(targetX-a.x, targetY-a.y);
-      ctx.save();
-      ctx.strokeStyle=getCss('--react-color');
-      ctx.lineWidth=2;
-      ctx.setLineDash([4,4]);
-      ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(pb.x,pb.y); ctx.stroke();
-      ctx.restore();
-      if(dist > 0.001){
+      if(hoverNodeId !== barStart && pixelDist >= 20 && dist >= 0.05){
+        ctx.save();
+        ctx.strokeStyle=getCss('--react-color');
+        ctx.lineWidth=2;
+        ctx.setLineDash([4,4]);
+        ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(pb.x,pb.y); ctx.stroke();
+        ctx.restore();
         drawSegmentDimensionPoints(pa, pb, dist);
       }
     }
