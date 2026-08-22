@@ -234,6 +234,9 @@
   button.mini.on{background:var(--accent);border-color:var(--accent-dark);color:#fff;}
   button.mini.danger{color:var(--danger);}
   button.mini.danger:hover{background:#fee2e2;border-color:var(--danger);}
+  button.mini-icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:28px;padding:0;flex:0 0 auto;}
+  button.mini-icon svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;}
+  button.mini-icon.on svg{stroke:#fff;}
   button.primary-btn{background:var(--accent);color:#fff;border:none;border-radius:6px;padding:8px 12px;
     font-size:12.5px;font-weight:600;cursor:pointer;width:100%;}
   button.primary-btn:hover{background:var(--accent-dark);}
@@ -2247,7 +2250,7 @@ let analysisSettings = {
   }
 };
 
-let mode='select';           // select | addNode | addBar | delete
+let mode='select';           // select | addBar | delete
 let selection={nodeIds:[], elemIds:[]};   // multi-selection: arrays of currently selected node/element ids
 let barStart=null;
 let dragNode=null;           // id of node being dragged
@@ -2255,7 +2258,7 @@ let dragNodeState=null;      // {nodeId, startPx, startPy, startX, startY, moved
 let panState=null;           // {startX,startY,startOffX,startOffY}
 let mouseModel={x:0,y:0};
 let hoverNodeId=null, hoverElemId=null;
-let lastPlacedNodeId=null;   // id węzła właśnie utworzonego trybem "Dodaj węzeł" — podgląd współrzędnych widoczny do następnej akcji
+let lastPlacedNodeId=null;   // id węzła właśnie utworzonego trybem "Dodaj węzeł" lub "Dodaj pręt" — podgląd współrzędnych widoczny do następnej akcji
 let lastDrawnElemId=null;    // id pręta właśnie utworzonego trybem "Dodaj pręt" — linia wymiarowa widoczna do następnej akcji
 let snapEnabled=true, snapSize=0.5;
 let allowNewNodesInBarMode=true;
@@ -4571,9 +4574,8 @@ function drawNodeCoordTip(nodeId){
   ctx.fillText(label, cx, by+h/2);
   ctx.restore();
 }
-function drawSingleDimension(el){
-  const a=getNode(el.n1), b=getNode(el.n2); if(!a||!b) return;
-  const pa=toScreen(a.x,a.y), pb=toScreen(b.x,b.y);
+function drawSegmentDimensionPoints(pa, pb, lengthMeters){
+  if(!pa || !pb) return;
   const dx=pb.x-pa.x, dy=pb.y-pa.y;
   const segLen=Math.hypot(dx,dy)||1;
   const ux=dx/segLen, uy=dy/segLen;
@@ -4583,7 +4585,7 @@ function drawSingleDimension(el){
   const ob={x:pb.x+nx*offset, y:pb.y+ny*offset};
   ctx.save();
   ctx.strokeStyle=DIMCOLOR; ctx.fillStyle=DIMCOLOR;
-  // linie pomocnicze od węzłów do linii wymiarowej
+  // linie pomocnicze od punktów do linii wymiarowej
   ctx.lineWidth=1; ctx.setLineDash([2,3]);
   ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(oa.x,oa.y); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(pb.x,pb.y); ctx.lineTo(ob.x,ob.y); ctx.stroke();
@@ -4591,13 +4593,14 @@ function drawSingleDimension(el){
   // linia wymiarowa
   ctx.lineWidth=1.4;
   ctx.beginPath(); ctx.moveTo(oa.x,oa.y); ctx.lineTo(ob.x,ob.y); ctx.stroke();
-  // kreski końcowe
+  // kreski końcowe (ukośne kreski 45 deg z obu stron, tak jak w liniach wymiarowych modelu)
   const tick=4;
-  ctx.beginPath(); ctx.moveTo(oa.x-ux*tick,oa.y-uy*tick); ctx.lineTo(oa.x+ux*tick,oa.y+uy*tick); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(ob.x-ux*tick,ob.y-uy*tick); ctx.lineTo(ob.x+ux*tick,ob.y+uy*tick); ctx.stroke();
+  const tx = (ux + nx) * tick, ty = (uy + ny) * tick;
+  ctx.beginPath(); ctx.moveTo(oa.x - tx, oa.y - ty); ctx.lineTo(oa.x + tx, oa.y + ty); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ob.x - tx, ob.y - ty); ctx.lineTo(ob.x + tx, ob.y + ty); ctx.stroke();
   // etykieta z długością
   const midx=(oa.x+ob.x)/2, midy=(oa.y+ob.y)/2;
-  const label = fmt(elLength(el),2)+' m';
+  const label = fmt(lengthMeters,2)+' m';
   ctx.font='11px '+FONT_MONO;
   const w=ctx.measureText(label).width;
   const padH=5, h=15;
@@ -4607,6 +4610,11 @@ function drawSingleDimension(el){
   ctx.textAlign='center'; ctx.textBaseline='middle';
   ctx.fillText(label, midx, midy);
   ctx.restore();
+}
+function drawSingleDimension(el){
+  const a=getNode(el.n1), b=getNode(el.n2); if(!a||!b) return;
+  const pa=toScreen(a.x,a.y), pb=toScreen(b.x,b.y);
+  drawSegmentDimensionPoints(pa, pb, elLength(el));
 }
 function drawElementDimensions(elsArr){ elsArr.forEach(drawSingleDimension); }
 function drawModelDimensionLines(){
@@ -4780,6 +4788,29 @@ function drawTransientOverlays(){
     drawNodeCoordTip(dragNode);
     return;
   }
+  if(mode==='addBar' && barStart!=null){
+    const a=getNode(barStart);
+    if(a){
+      const pa=toScreen(a.x,a.y);
+      let targetX = snap(mouseModel.x);
+      let targetY = snap(mouseModel.y);
+      if(hoverNodeId!=null){
+        const hn=getNode(hoverNodeId);
+        if(hn){ targetX=hn.x; targetY=hn.y; }
+      }
+      const pb=toScreen(targetX,targetY);
+      const dist=Math.hypot(targetX-a.x, targetY-a.y);
+      ctx.save();
+      ctx.strokeStyle=getCss('--react-color');
+      ctx.lineWidth=2;
+      ctx.setLineDash([4,4]);
+      ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(pb.x,pb.y); ctx.stroke();
+      ctx.restore();
+      if(dist > 0.001){
+        drawSegmentDimensionPoints(pa, pb, dist);
+      }
+    }
+  }
   if(lastDrawnElemId!=null){
     const el=getElement(lastDrawnElemId);
     if(el) drawElementDimensions([el]); else lastDrawnElemId=null;
@@ -4917,22 +4948,39 @@ const ICONS = {
   undo:'<svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2"/></svg>',
   redo:'<svg viewBox="0 0 24 24"><path d="M15 7l5 5-5 5M20 12H9a5 5 0 0 0 0 10h2"/></svg>',
   grid:'<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z M4 9.33h16 M4 14.67h16 M9.33 4v16 M14.67 4v16"/></svg>',
-  gear: '<svg viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37c.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>',
+  gear:'<svg viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37c.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>',
   boxselect:'<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1.5" stroke-dasharray="3 2.2"/></svg>',
+  moveNode:'<svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/><path d="M5 9l-3 3 3 3M19 9l3 3-3 3M9 5l3-3 3 3M9 19l3 3 3-3"/></svg>',
+  copyVec:'<svg viewBox="0 0 24 24"><rect x="3" y="3" width="12" height="12" rx="1.5"/><path d="M8 15v3a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-3"/></svg>',
+  rotate:'<svg viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 1 2.3 5.4"/><path d="M1.5 9.5L4.5 12.5L7.5 9.5"/></svg>',
+  copyRotate:'<svg viewBox="0 0 24 24"><path d="M3.5 13a6.5 6.5 0 1 1 2 4.8"/><path d="M1 10.5L3.5 13.5L6.5 10.5"/><rect x="15" y="3" width="6" height="6" rx="1.3"/></svg>',
+  mirror:'<svg viewBox="0 0 24 24"><path d="M12 3v18" stroke-dasharray="2.5 2.2"/><path d="M8 7L4 11l4 4M16 7l4 4-4 4"/></svg>',
+  copyMirror:'<svg viewBox="0 0 24 24"><path d="M10.5 3v18" stroke-dasharray="2.5 2.2"/><path d="M7 7L3.5 10.5 7 14M14 7l3.5 3.5L14 14"/><rect x="16" y="2" width="6" height="6" rx="1.3"/></svg>',
+  splitBar:'<svg viewBox="0 0 24 24"><circle cx="4" cy="20" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="20" cy="4" r="2"/><path d="M5.41 18.59L10.59 13.41M13.41 10.59L18.59 5.41"/></svg>',
+  intersect:'<svg viewBox="0 0 24 24"><path d="M4 4l16 16M20 4L4 20"/><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/></svg>',
+  copyLen:'<svg viewBox="0 0 24 24"><g opacity="0.35" stroke-dasharray="0.8 1.2"><path d="M9 3h6a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1Z" stroke-dasharray="none"/><rect x="4" y="5" width="16" height="17" rx="2"/></g><rect x="3" y="10" width="18" height="5" rx="1"/><path d="M7 10v2M11 10v2M15 10v2M19 10v2"/></svg>',
+  copyAngle:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g opacity="0.35" stroke-dasharray="0.8 1.2"><path d="M9 3h6a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1Z" stroke-dasharray="none"/><rect x="4" y="5" width="16" height="17" rx="2"/></g><path d="M7 18h10M7 18L16 7M12 18a5 5 0 0 0-1.46-3.54"/></svg>',
+  supNone:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M7 7l10 10"/></svg>',
+  supFixed:'<svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="1.6" fill="currentColor" stroke="none"/><path d="M4 12h16"/><path d="M6 12l-3 5M10 12l-3 5M14 12l-3 5M18 12l-3 5"/></svg>',
+  supPin:'<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><path d="M12 6l-6 8h12z"/><path d="M6 14h12"/><path d="M7 14l-2.5 4M11 14l-2.5 4M15 14l-2.5 4M19 14l-2.5 4"/></svg>',
+  supRollH:'<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><path d="M12 6l-6 8h12z"/><circle cx="8" cy="16.5" r="1.3"/><circle cx="12" cy="16.5" r="1.3"/><circle cx="16" cy="16.5" r="1.3"/></svg>',
+  supRollV:'<svg viewBox="0 0 24 24"><g transform="rotate(90 12 12)"><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><path d="M12 6l-6 8h12z"/><circle cx="8" cy="16.5" r="1.3"/><circle cx="12" cy="16.5" r="1.3"/><circle cx="16" cy="16.5" r="1.3"/></g></svg>',
+  supGuideV:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><path d="M9 3v18M15 3v18"/><path d="M9 5l-4 3M9 11l-4 3M9 17l-4 3M15 8l4-3M15 14l4-3M15 20l4-3"/></svg>',
+  supGuideH:'<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><path d="M4 8h16"/><path d="M4 12h16"/><path d="M6 12l-3 5M10 12l-3 5M14 12l-3 5M18 12l-3 5"/></svg>',
+  supSleeve:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><rect x="7" y="7" width="10" height="10"/><circle cx="4" cy="12" r="1.3"/><circle cx="20" cy="12" r="1.3"/><circle cx="12" cy="4" r="1.3"/><circle cx="12" cy="20" r="1.3"/></svg>',
 };
 function svgStroke(html){ return html; }
 
 function buildToolbar(){
   const tb=document.getElementById('toolbar');
-  const showSnapToggle = (mode==='addNode' || mode==='addBar' || mode==='select');
+  const showSnapToggle = (mode==='addBar' || mode==='select');
   const showNewNodesToggle = (mode==='addBar');
   const showBoxSelectToggle = (mode==='select');
   const isSolved = !!solved;
   tb.innerHTML = `
     <div class="tb-group">
       <button class="tb-btn" data-mode="select" title="Zaznacz / przesuń (V)">${ICONS.select}<span>Zaznacz</span></button>
-      <button class="tb-btn" data-mode="addNode" title="Dodaj węzeł (N)">${ICONS.node}<span>Węzeł</span></button>
-      <button class="tb-btn" data-mode="addBar" title="Dodaj pręt (B)">${ICONS.bar}<span>Pręt</span></button>
+      <button class="tb-btn" data-mode="addBar" title="Rysuj pręt / węzeł (R / B)">${ICONS.bar}<span>Rysuj</span></button>
       <button class="tb-btn" data-mode="delete" title="Usuń (Del)">${ICONS.del}<span>Usuń</span></button>
     </div>
     <div class="tb-group">
@@ -4999,8 +5047,7 @@ function setMode(m){
   // zmiana narzędzia chowa podgląd współrzędnych/wymiarów z poprzedniej akcji
   lastPlacedNodeId=null; lastDrawnElemId=null;
   const hints={select:selectModeHint(),
-    addNode:'Tryb: Dodaj węzeł — kliknij na płótnie, aby dodać węzeł',
-    addBar:'Tryb: Dodaj pręt — kliknij węzeł początkowy, potem końcowy (klik w puste miejsce tworzy nowy węzeł)',
+    addBar:'Tryb: Rysuj — kliknij punkt początkowy, potem końcowy (klik w puste miejsce tworzy węzeł)',
     delete:'Tryb: Usuń — kliknij węzeł lub pręt, aby go usunąć'};
   setStatusHint(hints[m]||'');
   buildToolbar(); renderSidebar(); render();
@@ -5337,7 +5384,7 @@ function handlePointerDown(px,py){
     clearSelection();
     panState={startX:px,startY:py,startOffX:view.offX,startOffY:view.offY,moved:false};
     renderSidebar(); render();
-  } else if(mode==='addNode' || mode==='addBar' || mode==='delete'){
+  } else if(mode==='addBar' || mode==='delete'){
     // Defer the actual action to pointer-up: a drag from here should pan the view
     // (and, mid-pinch, get cleared entirely by onTouchStart) rather than immediately
     // place/delete something — only a genuine tap (no significant movement) acts.
@@ -5346,38 +5393,29 @@ function handlePointerDown(px,py){
 }
 function performTapAction(tapMode,px,py){
   const mp=toModel(px,py);
-  if(tapMode==='addNode'){
-    const nid=hitTestNode(px,py);
-    if(nid!=null){
-      setStatusHint('Węzeł w tym miejscu już istnieje.');
-      return;
-    }
-    const snappedX = snap(mp.x);
-    const snappedY = snap(mp.y);
-    const existing = nodes.find(n => Math.hypot(n.x - snappedX, n.y - snappedY) < 1e-4);
-    if(existing){
-      setStatusHint('Węzeł o tych współrzędnych już istnieje.');
-      return;
-    }
-    lastPlacedNodeId = createNode(mp.x,mp.y);
-    setStatusHint('Tryb: Dodaj węzeł — kliknij na płótnie, aby dodać węzeł');
-    renderSidebar(); render();
-  } else if(tapMode==='addBar'){
+  if(tapMode==='addBar'){
     const nid=hitTestNode(px,py);
     if(nid==null && !allowNewNodesInBarMode){
-      setStatusHint('Tryb: Dodaj pręt — „Nowe węzły” wyłączone: kliknij istniejący węzeł');
+      setStatusHint('Tryb: Rysuj — „Auto-węzeł” wyłączony: kliknij istniejący węzeł');
       return;
     }
     let useId = nid;
+    let createdNodeId = null;
     if(useId == null){
       const snappedX = snap(mp.x);
       const snappedY = snap(mp.y);
       const existing = nodes.find(n => Math.hypot(n.x - snappedX, n.y - snappedY) < 1e-4);
-      useId = existing ? existing.id : createNode(mp.x,mp.y);
+      if(existing){
+        useId = existing.id;
+      } else {
+        useId = createNode(mp.x,mp.y);
+        createdNodeId = useId;
+      }
     }
     if(barStart==null){
       barStart=useId;
-      setStatusHint('Tryb: Dodaj pręt — wybierz węzeł końcowy');
+      if(createdNodeId!=null) lastPlacedNodeId = createdNodeId;
+      setStatusHint('Tryb: Rysuj — wybierz punkt końcowy');
     } else if(barStart===useId){
       setStatusHint('Wybrano ten sam węzeł.');
     } else {
@@ -5385,12 +5423,14 @@ function performTapAction(tapMode,px,py){
       if(exists){
         setStatusHint(`Pręt między węzłami W${barStart} i W${useId} już istnieje.`);
         barStart=useId;
+        if(createdNodeId!=null) lastPlacedNodeId = createdNodeId;
       } else {
         const createdId = createElement(barStart,useId);
         if(createdId!=null){
           barStart=useId;
           lastDrawnElemId = createdId;
-          setStatusHint('Tryb: Dodaj pręt — wybierz węzeł końcowy');
+          if(createdNodeId!=null) lastPlacedNodeId = createdNodeId;
+          setStatusHint('Tryb: Rysuj — wybierz punkt końcowy');
         }
       }
     }
@@ -5458,6 +5498,13 @@ function handlePointerMove(px,py){
     canvas.style.cursor = (nid!=null||eid!=null)? 'pointer':(panState?'grabbing':'default');
   } else {
     canvas.style.cursor='crosshair';
+    if(mode==='addBar'){
+      const nid=hitTestNode(px,py);
+      const eid=nid==null ? hitTestElement(px,py) : null;
+      if(nid!==hoverNodeId || eid!==hoverElemId || barStart!=null){
+        hoverNodeId=nid; hoverElemId=eid; render();
+      }
+    }
   }
 }
 function onUp(e){ handlePointerUp(); }
@@ -5542,8 +5589,7 @@ function onKey(e){
     if(solved && solved.type==='modal'){ e.preventDefault(); nextModalMode(); return; }
   }
   if(e.key==='v'||e.key==='V') setMode('select');
-  if(e.key==='n'||e.key==='N') setMode('addNode');
-  if(e.key==='b'||e.key==='B') setMode('addBar');
+  if(e.key==='b'||e.key==='B'||e.key==='r'||e.key==='R'||e.key==='n'||e.key==='N') setMode('addBar');
   if(e.key==='Enter') toggleSolveOrBack();
 }
 
@@ -5870,6 +5916,9 @@ function presetMatches(n,key){
   if(key==='pin') return t(sp.ux)==='fixed'&&t(sp.uy)==='fixed'&&t(sp.rz)==='free';
   if(key==='rollerH') return t(sp.ux)==='free'&&t(sp.uy)==='fixed'&&t(sp.rz)==='free';
   if(key==='rollerV') return t(sp.ux)==='fixed'&&t(sp.uy)==='free'&&t(sp.rz)==='free';
+  if(key==='guideV') return t(sp.ux)==='fixed'&&t(sp.uy)==='free'&&t(sp.rz)==='fixed';
+  if(key==='guideH') return t(sp.ux)==='free'&&t(sp.uy)==='fixed'&&t(sp.rz)==='fixed';
+  if(key==='sleeve') return t(sp.ux)==='free'&&t(sp.uy)==='free'&&t(sp.rz)==='fixed';
   return false;
 }
 /* nodesArr: one or more selected node objects. type/k/delta each fall back to a
@@ -5912,16 +5961,27 @@ function panelNode(nodesArr){
   let html = `<div class="panel">
     <h3>${header}</h3>
     ${!multi? pairRow('X',nodesArr[0].x,'0.1','m',`updateNodeCoordSel('x',this.value)`,'Y',nodesArr[0].y,'0.1','m',`updateNodeCoordSel('y',this.value)`) : '<div class="muted">Aby edytować współrzędne X/Y, zaznacz pojedynczy węzeł.</div>'}
-    <div class="btnrow"><button class="mini danger" onclick="deleteSelectedNodes()">Usuń ${multi?'zaznaczone węzły':'węzeł'}</button></div>
+    <div class="btnrow">
+      <button class="mini mini-icon danger" onclick="deleteSelectedNodes()" title="Usuń ${multi?'zaznaczone węzły':'węzeł'}">${ICONS.del}</button>
+      <button class="mini mini-icon ${moveFormOpen?'on':''}" onclick="openMoveForm()" title="Przenieś ${multi?'zaznaczone węzły':'węzeł'}">${ICONS.moveNode}</button>
+      <button class="mini mini-icon ${nodeRotateFormOpen?'on':''}" onclick="openNodeRotateForm()" title="Obróć ${multi?'zaznaczone węzły':'węzeł'}">${ICONS.rotate}</button>
+      <button class="mini mini-icon ${nodeMirrorFormOpen?'on':''}" onclick="openNodeMirrorForm()" title="Odbicie lustrzane ${multi?'zaznaczonych węzłów':'węzła'}">${ICONS.mirror}</button>
+    </div>
+    ${moveFormOpen? moveFormHtml() : ''}
+    ${nodeRotateFormOpen? nodeRotateFormHtml() : ''}
+    ${nodeMirrorFormOpen? nodeMirrorFormHtml() : ''}
   </div>
   <div class="panel">
     <h3>Podpora</h3>
     <div class="btnrow">
-      <button class="mini ${nodesArr.every(n=>presetMatches(n,'none'))?'on':''}" onclick="bulkApplySupportPreset('none')">Brak</button>
-      <button class="mini ${nodesArr.every(n=>presetMatches(n,'fixed'))?'on':''}" onclick="bulkApplySupportPreset('fixed')">Utwierdzenie</button>
-      <button class="mini ${nodesArr.every(n=>presetMatches(n,'pin'))?'on':''}" onclick="bulkApplySupportPreset('pin')">Przegubowa stała</button>
-      <button class="mini ${nodesArr.every(n=>presetMatches(n,'rollerH'))?'on':''}" onclick="bulkApplySupportPreset('rollerH')">Przesuwna pozioma</button>
-      <button class="mini ${nodesArr.every(n=>presetMatches(n,'rollerV'))?'on':''}" onclick="bulkApplySupportPreset('rollerV')">Przesuwna pionowa</button>
+      <button class="mini mini-icon ${nodesArr.every(n=>presetMatches(n,'none'))?'on':''}" onclick="bulkApplySupportPreset('none')" title="Brak podpory">${ICONS.supNone}</button>
+      <button class="mini mini-icon ${nodesArr.every(n=>presetMatches(n,'fixed'))?'on':''}" onclick="bulkApplySupportPreset('fixed')" title="Utwierdzenie">${ICONS.supFixed}</button>
+      <button class="mini mini-icon ${nodesArr.every(n=>presetMatches(n,'pin'))?'on':''}" onclick="bulkApplySupportPreset('pin')" title="Podpora przegubowo-stała">${ICONS.supPin}</button>
+      <button class="mini mini-icon ${nodesArr.every(n=>presetMatches(n,'rollerH'))?'on':''}" onclick="bulkApplySupportPreset('rollerH')" title="Podpora przegubowo-przesuwna pozioma">${ICONS.supRollH}</button>
+      <button class="mini mini-icon ${nodesArr.every(n=>presetMatches(n,'rollerV'))?'on':''}" onclick="bulkApplySupportPreset('rollerV')" title="Podpora przegubowo-przesuwna pionowa">${ICONS.supRollV}</button>
+      <button class="mini mini-icon ${nodesArr.every(n=>presetMatches(n,'guideV'))?'on':''}" onclick="bulkApplySupportPreset('guideV')" title="Prowadzenie pionowe (łyżwa pionowa)">${ICONS.supGuideV}</button>
+      <button class="mini mini-icon ${nodesArr.every(n=>presetMatches(n,'guideH'))?'on':''}" onclick="bulkApplySupportPreset('guideH')" title="Prowadzenie poziome (łyżwa pozioma)">${ICONS.supGuideH}</button>
+      <button class="mini mini-icon ${nodesArr.every(n=>presetMatches(n,'sleeve'))?'on':''}" onclick="bulkApplySupportPreset('sleeve')" title="Tuleja obrotowa (blokuje tylko obrót)">${ICONS.supSleeve}</button>
     </div>
     <hr class="sep">
     <div class="row"><label>Kąt podpory</label><input type="number" step="5" ${numInputAttrs(commonVal(nodesArr,n=>n.support?(n.support.angleDeg||0):0))} onchange="bulkUpdateSupportAngle(this.value)"><span class="unit">°</span></div>
@@ -6002,22 +6062,34 @@ function panelElement(elArr){
       <h3>Pręt P${el.id} <span class="tag">W${el.n1}→W${el.n2}</span></h3>
       <div class="muted" style="margin-bottom:8px;">Długość L=${fmt(L,3)} m &nbsp;·&nbsp; kąt nachylenia=${fmt(angDeg,2)}°</div>
       <div class="btnrow">
-        <button class="mini danger" onclick="deleteSelectedElements()">Usuń pręt</button>
-        <button class="mini" onclick="copyToClipboard('${fmt(L,3)}','długość P${el.id}')">Kopiuj długość</button>
-        <button class="mini" onclick="copyToClipboard('${fmt(angDeg,2)}','kąt P${el.id}')">Kopiuj kąt</button>
-        <button class="mini" onclick="openSplitForm(${el.id})">Podziel pręt</button>
+        <button class="mini mini-icon danger" onclick="deleteSelectedElements()" title="Usuń pręt">${ICONS.del}</button>
+        <button class="mini mini-icon" onclick="copyToClipboard('${fmt(L,3)}','długość P${el.id}')" title="Kopiuj długość do schowka">${ICONS.copyLen}</button>
+        <button class="mini mini-icon" onclick="copyToClipboard('${fmt(angDeg,2)}','kąt P${el.id}')" title="Kopiuj kąt do schowka">${ICONS.copyAngle}</button>
+        <button class="mini mini-icon ${splitFormElId===el.id?'on':''}" onclick="openSplitForm(${el.id})" title="Podziel pręt">${ICONS.splitBar}</button>
+        <button class="mini mini-icon ${copyFormOpen?'on':''}" onclick="openCopyForm()" title="Kopiuj pręt">${ICONS.copyVec}</button>
+        <button class="mini mini-icon ${copyRotateFormOpen?'on':''}" onclick="openCopyRotateForm()" title="Kopiuj pręt z obrotem">${ICONS.copyRotate}</button>
+        <button class="mini mini-icon ${copyMirrorFormOpen?'on':''}" onclick="openCopyMirrorForm()" title="Kopiuj pręt z odbiciem lustrzanym">${ICONS.copyMirror}</button>
       </div>
       ${splitFormElId===el.id? splitFormHtml(el) : ''}
+      ${copyFormOpen? copyFormHtml() : ''}
+      ${copyRotateFormOpen? copyRotateFormHtml() : ''}
+      ${copyMirrorFormOpen? copyMirrorFormHtml() : ''}
     </div>`;
   } else {
     topPanel = `<div class="panel">
       <h3>Pręty (${elArr.length}): ${elArr.map(e=>'P'+e.id).join(', ')}</h3>
       <div class="btnrow">
-        <button class="mini danger" onclick="deleteSelectedElements()">Usuń zaznaczone pręty</button>
-        <button class="mini" onclick="openSplitForm('__bulk__')">Podziel zaznaczone pręty</button>
-        <button class="mini" onclick="splitSelectedElementsAtIntersections()">Znajdź przecięcia prętów</button>
+        <button class="mini mini-icon danger" onclick="deleteSelectedElements()" title="Usuń zaznaczone pręty">${ICONS.del}</button>
+        <button class="mini mini-icon" onclick="splitSelectedElementsAtIntersections()" title="Znajdź przecięcia prętów">${ICONS.intersect}</button>
+        <button class="mini mini-icon ${splitFormElId==='__bulk__'?'on':''}" onclick="openSplitForm('__bulk__')" title="Podziel zaznaczone pręty">${ICONS.splitBar}</button>
+        <button class="mini mini-icon ${copyFormOpen?'on':''}" onclick="openCopyForm()" title="Kopiuj zaznaczone pręty">${ICONS.copyVec}</button>
+        <button class="mini mini-icon ${copyRotateFormOpen?'on':''}" onclick="openCopyRotateForm()" title="Kopiuj zaznaczone pręty z obrotem">${ICONS.copyRotate}</button>
+        <button class="mini mini-icon ${copyMirrorFormOpen?'on':''}" onclick="openCopyMirrorForm()" title="Kopiuj zaznaczone pręty z odbiciem lustrzanym">${ICONS.copyMirror}</button>
       </div>
       ${splitFormElId==='__bulk__'? splitFormHtmlBulk(elArr) : ''}
+      ${copyFormOpen? copyFormHtml() : ''}
+      ${copyRotateFormOpen? copyRotateFormHtml() : ''}
+      ${copyMirrorFormOpen? copyMirrorFormHtml() : ''}
     </div>`;
   }
 
@@ -6077,7 +6149,17 @@ function panelElement(elArr){
 
 /* ---- element split ---- */
 let splitFormElId=null, splitMode='single', splitT=0.5, splitN=2;
-function openSplitForm(elId){ splitFormElId=elId; splitMode='single'; splitT=0.5; splitN=2; renderSidebar(); }
+function openSplitForm(elId){
+  const wasOpen = (splitFormElId === elId);
+  closeAllInlineForms();
+  if(!wasOpen){
+    splitFormElId = elId;
+    splitMode = 'single';
+    splitT = 0.5;
+    splitN = 2;
+  }
+  renderSidebar();
+}
 function closeSplitForm(){ splitFormElId=null; renderSidebar(); }
 function setSplitMode(m){ splitMode=m; renderSidebar(); }
 function setSplitT(v){ splitT=Math.max(0.02,Math.min(0.98,parseFloat(v)||0.5)); }
@@ -6172,6 +6254,398 @@ function confirmSplitBulk(){
   ids.forEach(id=>{ allNewIds = allNewIds.concat(splitElement(id,points)); });
   closeSplitForm();
   selection = {nodeIds:[], elemIds: allNewIds};
+  invalidateResults(); renderSidebar(); render();
+}
+
+/* ---- shared inline-form bookkeeping: only one of split/move/copy/rotate/mirror form is open at a time ---- */
+function closeAllInlineForms(){
+  splitFormElId=null; moveFormOpen=false; copyFormOpen=false;
+  nodeRotateFormOpen=false; nodeMirrorFormOpen=false;
+  copyRotateFormOpen=false; copyMirrorFormOpen=false;
+}
+
+/* ---- node move ---- */
+let moveFormOpen=false, moveDx=0, moveDy=0;
+function openMoveForm(){
+  const wasOpen=moveFormOpen;
+  closeAllInlineForms();
+  moveFormOpen = !wasOpen;
+  moveDx=0; moveDy=0;
+  renderSidebar();
+}
+function closeMoveForm(){ moveFormOpen=false; renderSidebar(); }
+function setMoveDx(v){ moveDx=parseFloat(v)||0; }
+function setMoveDy(v){ moveDy=parseFloat(v)||0; }
+function moveFormHtml(){
+  return `<div class="card" style="margin-top:8px;background:var(--surface);border-color:var(--input-border);">
+    <div class="muted" style="margin-bottom:6px;">Wektor przeniesienia zaznaczonych węzłów.</div>
+    ${pairRow('Δx',moveDx,'0.1','m',`setMoveDx(this.value)`,'Δy',moveDy,'0.1','m',`setMoveDy(this.value)`)}
+    <div class="btnrow" style="margin-top:8px;">
+      <button class="mini on" onclick="confirmMove()">Przenieś</button>
+      <button class="mini" onclick="closeMoveForm()">Anuluj</button>
+    </div>
+  </div>`;
+}
+function confirmMove(){
+  const ids = selectedNodes().map(n=>n.id);
+  if(!ids.length){ closeMoveForm(); return; }
+  ids.forEach(id=>{
+    const n=getNode(id); if(!n) return;
+    n.x = Math.round((n.x+moveDx)*1e6)/1e6;
+    n.y = Math.round((n.y+moveDy)*1e6)/1e6;
+  });
+  const finalIds=[];
+  ids.forEach(id=>{
+    const n=getNode(id);
+    if(!n) return; // already merged away earlier in this same pass
+    const target = checkAndMergeCoincidentNode(id);
+    finalIds.push(target!=null? target : id);
+  });
+  moveFormOpen=false;
+  selection = {nodeIds: Array.from(new Set(finalIds)), elemIds:[]};
+  invalidateResults(); renderSidebar(); render();
+}
+
+/* ---- element copy ----
+   Copies the selected elements together with their (deduplicated) endpoint nodes, carrying
+   over supports/loads on the nodes and loads on the elements unchanged (a pure translation
+   doesn't change any load direction). After copying, any new node/element that lands exactly
+   on top of an existing one is merged/deduplicated via the existing mergeNodeInto machinery. */
+let copyFormOpen=false, copyDx=2, copyDy=0;
+function openCopyForm(){
+  const wasOpen=copyFormOpen;
+  closeAllInlineForms();
+  copyFormOpen = !wasOpen;
+  renderSidebar();
+}
+function closeCopyForm(){ copyFormOpen=false; renderSidebar(); }
+function setCopyDx(v){ copyDx=parseFloat(v)||0; }
+function setCopyDy(v){ copyDy=parseFloat(v)||0; }
+function copyFormHtml(){
+  return `<div class="card" style="margin-top:8px;background:var(--surface);border-color:var(--input-border);">
+    <div class="muted" style="margin-bottom:6px;">Kopiuje zaznaczone pręty wraz z ich węzłami, podporami i obciążeniami. Węzły i pręty, które po skopiowaniu pokryją się z istniejącymi, zostaną automatycznie połączone.</div>
+    ${pairRow('Wektor kopiowania Δx',copyDx,'0.1','m',`setCopyDx(this.value)`,'Wektor kopiowania Δy',copyDy,'0.1','m',`setCopyDy(this.value)`)}
+    <div class="btnrow" style="margin-top:8px;">
+      <button class="mini on" onclick="confirmCopy()">Kopiuj</button>
+      <button class="mini" onclick="closeCopyForm()">Anuluj</button>
+    </div>
+  </div>`;
+}
+/* ---- shared rotate/mirror math ----
+   Vector-type quantities (force angle/components, resultant-mode q angle, support angleDeg)
+   are rotated or reflected together with node positions; concentrated moments and per-hinge
+   moments flip sign under mirroring only (a reflection reverses ccw/cw handedness, a rotation
+   doesn't); thermal ΔT top/bottom swap under mirroring (the element's local "top" side flips
+   with the reflection) and are left untouched under rotation (the local "top" direction is
+   derived from the element's own geometry, which already rotates with its nodes). */
+function rotatePoint(x,y,cx,cy,angDeg){
+  const a=angDeg*Math.PI/180, c=Math.cos(a), s=Math.sin(a);
+  const dx=x-cx, dy=y-cy;
+  return {x: cx+dx*c-dy*s, y: cy+dx*s+dy*c};
+}
+function rotateVectorComponents(fx,fy,angDeg){
+  const a=angDeg*Math.PI/180, c=Math.cos(a), s=Math.sin(a);
+  return {x: fx*c-fy*s, y: fx*s+fy*c};
+}
+function lineAngleDeg(x1,y1,x2,y2){ return Math.atan2(y2-y1,x2-x1)*180/Math.PI; }
+function mirrorPoint(x,y,x1,y1,x2,y2){
+  const dx=x2-x1, dy=y2-y1;
+  const len2=dx*dx+dy*dy;
+  if(len2<1e-12) return {x,y};
+  const vx=x-x1, vy=y-y1;
+  const t=(vx*dx+vy*dy)/len2;
+  const projx=x1+t*dx, projy=y1+t*dy;
+  return {x: 2*projx-x, y: 2*projy-y};
+}
+function mirrorVectorComponents(fx,fy,lineAngRad){
+  const c2=Math.cos(2*lineAngRad), s2=Math.sin(2*lineAngRad);
+  return {x: fx*c2+fy*s2, y: fx*s2-fy*c2};
+}
+function applyTransformMergePass(ids){
+  const finalIds=[];
+  ids.forEach(id=>{
+    const n=getNode(id);
+    if(!n) return; // already merged away earlier in this same pass
+    const target=checkAndMergeCoincidentNode(id);
+    finalIds.push(target!=null? target : id);
+  });
+  return Array.from(new Set(finalIds));
+}
+/* Shared rotate/mirror parameter state (only one inline form is open at a time, so the same
+   fields can safely be reused by the node "Obróć"/"Lustrzane odbicie" actions and by the
+   pręt "Kopiuj z obrotem"/"Kopiuj z lustrzanym odbiciem" actions). */
+let rotCx=0, rotCy=0, rotAngle=90;
+let mirX1=0, mirY1=0, mirX2=1, mirY2=0;
+function setRotCx(v){ rotCx=parseFloat(v)||0; }
+function setRotCy(v){ rotCy=parseFloat(v)||0; }
+function setRotAngle(v){ rotAngle=parseFloat(v)||0; }
+function setMirX1(v){ mirX1=parseFloat(v)||0; }
+function setMirY1(v){ mirY1=parseFloat(v)||0; }
+function setMirX2(v){ mirX2=parseFloat(v)||0; }
+function setMirY2(v){ mirY2=parseFloat(v)||0; }
+function setTransformDefaults(ids, mode){
+  const pts=ids.map(getNode).filter(Boolean);
+  if(!pts.length) return;
+  const cx=pts.reduce((s,n)=>s+n.x,0)/pts.length;
+  const cy=pts.reduce((s,n)=>s+n.y,0)/pts.length;
+  if(mode==='rotate'){ rotCx=Math.round(cx*100)/100; rotCy=Math.round(cy*100)/100; rotAngle=90; }
+  else { mirX1=Math.round((cx-1)*100)/100; mirY1=Math.round(cy*100)/100; mirX2=Math.round((cx+1)*100)/100; mirY2=Math.round(cy*100)/100; }
+}
+function rotateFormFields(confirmFn,cancelFn){
+  return `<div class="card" style="margin-top:8px;background:var(--surface);border-color:var(--input-border);">
+    ${pairRow('Środek obrotu X',rotCx,'0.1','m',`setRotCx(this.value)`,'Środek obrotu Y',rotCy,'0.1','m',`setRotCy(this.value)`)}
+    <div class="row"><label>Kąt obrotu</label><input type="number" step="5" value="${rotAngle}" onchange="setRotAngle(this.value)"><span class="unit">°</span></div>
+    <div class="muted">Kąt dodatni = przeciwnie do ruchu wskazówek zegara.</div>
+    <div class="btnrow" style="margin-top:8px;">
+      <button class="mini on" onclick="${confirmFn}">Obróć</button>
+      <button class="mini" onclick="${cancelFn}">Anuluj</button>
+    </div>
+  </div>`;
+}
+function mirrorFormFields(confirmFn,cancelFn){
+  return `<div class="card" style="margin-top:8px;background:var(--surface);border-color:var(--input-border);">
+    <div class="muted" style="margin-bottom:6px;">Podaj współrzędne dwóch punktów wyznaczających linię lustra.</div>
+    ${pairRow('Punkt 1 – X',mirX1,'0.1','m',`setMirX1(this.value)`,'Punkt 1 – Y',mirY1,'0.1','m',`setMirY1(this.value)`)}
+    ${pairRow('Punkt 2 – X',mirX2,'0.1','m',`setMirX2(this.value)`,'Punkt 2 – Y',mirY2,'0.1','m',`setMirY2(this.value)`)}
+    <div class="btnrow" style="margin-top:8px;">
+      <button class="mini on" onclick="${confirmFn}">Odbij</button>
+      <button class="mini" onclick="${cancelFn}">Anuluj</button>
+    </div>
+  </div>`;
+}
+
+/* ---- element copy: shared engine for plain copy / copy+rotate / copy+mirror ----
+   posFn(x,y)->{x,y} transforms a node's position; angleFn(deg)->deg transforms any
+   angle-type field (force angle, support angleDeg, resultant-mode q angle); vecFn(fx,fy)->{x,y}
+   transforms force components; flipHandedness (true only for mirroring) negates concentrated
+   moments and per-hinge moments and swaps thermal ΔT top/bottom, matching a reflection's
+   reversal of ccw/cw sense. */
+function copyElementsTransformed(posFn, angleFn, vecFn, flipHandedness){
+  const elArr = selectedElements();
+  if(!elArr.length) return null;
+  const nodeIdMap = new Map();
+  const srcNodeIds = [];
+  elArr.forEach(e=>{
+    [e.n1,e.n2].forEach(id=>{ if(srcNodeIds.indexOf(id)===-1) srcNodeIds.push(id); });
+  });
+  srcNodeIds.forEach(id=>{
+    const n=getNode(id); if(!n) return;
+    const p=posFn(n.x,n.y);
+    const newId = createNode(p.x, p.y, true);
+    const nn=getNode(newId);
+    nn.force = n.force? JSON.parse(JSON.stringify(n.force)) : null;
+    nn.moment = n.moment? JSON.parse(JSON.stringify(n.moment)) : null;
+    nn.support = n.support? JSON.parse(JSON.stringify(n.support)) : null;
+    nn.mass = n.mass? JSON.parse(JSON.stringify(n.mass)) : null;
+    if(nn.support){ nn.support.angleDeg = angleFn(nn.support.angleDeg||0); }
+    if(nn.force){
+      if(nn.force.mode==='components'){
+        const v=vecFn(nn.force.Fx||0, nn.force.Fy||0);
+        nn.force.Fx=Math.round(v.x*1000)/1000; nn.force.Fy=Math.round(v.y*1000)/1000;
+      } else {
+        nn.force.angle = angleFn(nn.force.angle||0);
+      }
+    }
+    if(nn.moment && flipHandedness){ nn.moment.M = -(nn.moment.M||0); }
+    nodeIdMap.set(id,newId);
+  });
+  const newElemIds=[];
+  elArr.forEach(e=>{
+    const n1=nodeIdMap.get(e.n1), n2=nodeIdMap.get(e.n2);
+    if(n1==null||n2==null) return;
+    const newId=createElement(n1,n2);
+    if(newId==null) return;
+    const ne=getElement(newId);
+    ne.sectionId=e.sectionId; ne.materialId=e.materialId;
+    ne.hingeStart=!!e.hingeStart; ne.hingeEnd=!!e.hingeEnd;
+    if(e.hingeStart && e.momentHingeStart!=null) ne.momentHingeStart = flipHandedness? -e.momentHingeStart : e.momentHingeStart;
+    if(e.hingeEnd && e.momentHingeEnd!=null) ne.momentHingeEnd = flipHandedness? -e.momentHingeEnd : e.momentHingeEnd;
+    ne.q = e.q? JSON.parse(JSON.stringify(e.q)) : null;
+    if(ne.q && ne.q.mode==='resultant'){ ne.q.angle = angleFn(ne.q.angle||0); }
+    ne.thermal = e.thermal? JSON.parse(JSON.stringify(e.thermal)) : null;
+    if(ne.thermal && flipHandedness){ const t=ne.thermal.dTtop; ne.thermal.dTtop=ne.thermal.dTbottom; ne.thermal.dTbottom=t; }
+    newElemIds.push(newId);
+  });
+  // Merge any copied node that now coincides with another node (existing or newly copied),
+  // reusing mergeNodeInto — which also drops any resulting duplicate (overlapping) elements.
+  const finalNodeIds=[];
+  nodeIdMap.forEach(newId=>{
+    const n=getNode(newId);
+    if(!n) return; // already merged away earlier in this same pass
+    const target=checkAndMergeCoincidentNode(newId);
+    finalNodeIds.push(target!=null? target : newId);
+  });
+  const validElemIds = new Set(elements.map(e=>e.id));
+  const finalElemIds = newElemIds.filter(id=>validElemIds.has(id));
+  return {count: elArr.length, finalElemIds};
+}
+function confirmCopy(){
+  const res=copyElementsTransformed(
+    (x,y)=>({x:x+copyDx,y:y+copyDy}),
+    a=>a,
+    (fx,fy)=>({x:fx,y:fy}),
+    false
+  );
+  if(!res){ closeCopyForm(); return; }
+  copyFormOpen=false;
+  selection = {nodeIds:[], elemIds: res.finalElemIds};
+  invalidateResults(); renderSidebar(); render();
+  setStatusHint(`Skopiowano ${res.count} ${res.count===1?'pręt':(res.count<5?'pręty':'prętów')}.`);
+}
+
+/* ---- pręt group: kopiuj z obrotem ---- */
+let copyRotateFormOpen=false;
+function openCopyRotateForm(){
+  const wasOpen=copyRotateFormOpen;
+  closeAllInlineForms();
+  if(wasOpen){ renderSidebar(); return; }
+  copyRotateFormOpen=true;
+  const ids=new Set(); selectedElements().forEach(e=>{ ids.add(e.n1); ids.add(e.n2); });
+  setTransformDefaults(Array.from(ids),'rotate');
+  renderSidebar();
+}
+function closeCopyRotateForm(){ copyRotateFormOpen=false; renderSidebar(); }
+function copyRotateFormHtml(){
+  return rotateFormFields('confirmCopyRotate()','closeCopyRotateForm()').replace('Obróć</button>','Kopiuj z obrotem</button>');
+}
+function confirmCopyRotate(){
+  const ang=rotAngle;
+  const res=copyElementsTransformed(
+    (x,y)=>rotatePoint(x,y,rotCx,rotCy,ang),
+    a=>normalizeAngle(a+ang),
+    (fx,fy)=>rotateVectorComponents(fx,fy,ang),
+    false
+  );
+  if(!res){ closeCopyRotateForm(); return; }
+  copyRotateFormOpen=false;
+  selection = {nodeIds:[], elemIds: res.finalElemIds};
+  invalidateResults(); renderSidebar(); render();
+  setStatusHint(`Skopiowano z obrotem ${res.count} ${res.count===1?'pręt':(res.count<5?'pręty':'prętów')}.`);
+}
+
+/* ---- pręt group: kopiuj z lustrzanym odbiciem ---- */
+let copyMirrorFormOpen=false;
+function openCopyMirrorForm(){
+  const wasOpen=copyMirrorFormOpen;
+  closeAllInlineForms();
+  if(wasOpen){ renderSidebar(); return; }
+  copyMirrorFormOpen=true;
+  const ids=new Set(); selectedElements().forEach(e=>{ ids.add(e.n1); ids.add(e.n2); });
+  setTransformDefaults(Array.from(ids),'mirror');
+  renderSidebar();
+}
+function closeCopyMirrorForm(){ copyMirrorFormOpen=false; renderSidebar(); }
+function copyMirrorFormHtml(){
+  return mirrorFormFields('confirmCopyMirror()','closeCopyMirrorForm()').replace('Odbij</button>','Kopiuj z odbiciem</button>');
+}
+function confirmCopyMirror(){
+  const x1=mirX1,y1=mirY1,x2=mirX2,y2=mirY2;
+  if(Math.hypot(x2-x1,y2-y1)<1e-6){ setStatusHint('Podaj dwa różne punkty, aby wyznaczyć linię lustra.'); return; }
+  const phiDeg=lineAngleDeg(x1,y1,x2,y2);
+  const phiRad=phiDeg*Math.PI/180;
+  const res=copyElementsTransformed(
+    (x,y)=>mirrorPoint(x,y,x1,y1,x2,y2),
+    a=>normalizeAngle(2*phiDeg-a),
+    (fx,fy)=>mirrorVectorComponents(fx,fy,phiRad),
+    true
+  );
+  if(!res){ closeCopyMirrorForm(); return; }
+  copyMirrorFormOpen=false;
+  selection = {nodeIds:[], elemIds: res.finalElemIds};
+  invalidateResults(); renderSidebar(); render();
+  setStatusHint(`Skopiowano z odbiciem lustrzanym ${res.count} ${res.count===1?'pręt':(res.count<5?'pręty':'prętów')}.`);
+}
+
+/* ---- node group: obróć / lustrzane odbicie (in-place, analogous to "przenieś") ----
+   Acts only on the directly-selected nodes. If a pręt's BOTH endpoint nodes are among those
+   selected nodes, its resultant-mode obciążenie ciągłe direction is transformed along with
+   the geometry (per user request), even though the pręt itself needn't be selected. */
+let nodeRotateFormOpen=false, nodeMirrorFormOpen=false;
+function openNodeRotateForm(){
+  const wasOpen=nodeRotateFormOpen;
+  closeAllInlineForms();
+  if(wasOpen){ renderSidebar(); return; }
+  nodeRotateFormOpen=true;
+  setTransformDefaults(selectedNodes().map(n=>n.id),'rotate');
+  renderSidebar();
+}
+function closeNodeRotateForm(){ nodeRotateFormOpen=false; renderSidebar(); }
+function nodeRotateFormHtml(){ return rotateFormFields('confirmNodeRotate()','closeNodeRotateForm()'); }
+function confirmNodeRotate(){
+  const ids=selectedNodes().map(n=>n.id);
+  if(!ids.length){ closeNodeRotateForm(); return; }
+  const ang=rotAngle;
+  const nodeSet=new Set(ids);
+  ids.forEach(id=>{
+    const n=getNode(id); if(!n) return;
+    const p=rotatePoint(n.x,n.y,rotCx,rotCy,ang);
+    n.x=Math.round(p.x*1e6)/1e6; n.y=Math.round(p.y*1e6)/1e6;
+    if(n.support){ n.support.angleDeg=normalizeAngle((n.support.angleDeg||0)+ang); }
+    if(n.force){
+      if(n.force.mode==='components'){
+        const v=rotateVectorComponents(n.force.Fx||0,n.force.Fy||0,ang);
+        n.force.Fx=Math.round(v.x*1000)/1000; n.force.Fy=Math.round(v.y*1000)/1000;
+      } else {
+        n.force.angle=normalizeAngle((n.force.angle||0)+ang);
+      }
+    }
+    // n.moment (concentrated moment) is unchanged: a rotation preserves ccw/cw handedness.
+  });
+  elements.forEach(e=>{
+    if(nodeSet.has(e.n1) && nodeSet.has(e.n2) && e.q && e.q.mode==='resultant'){
+      e.q.angle=normalizeAngle((e.q.angle||0)+ang);
+    }
+  });
+  const finalNodeIds=applyTransformMergePass(ids);
+  const finalElemIds=selection.elemIds.filter(id=>elements.some(e=>e.id===id));
+  nodeRotateFormOpen=false;
+  selection={nodeIds:finalNodeIds, elemIds:finalElemIds};
+  invalidateResults(); renderSidebar(); render();
+}
+function openNodeMirrorForm(){
+  const wasOpen=nodeMirrorFormOpen;
+  closeAllInlineForms();
+  if(wasOpen){ renderSidebar(); return; }
+  nodeMirrorFormOpen=true;
+  setTransformDefaults(selectedNodes().map(n=>n.id),'mirror');
+  renderSidebar();
+}
+function closeNodeMirrorForm(){ nodeMirrorFormOpen=false; renderSidebar(); }
+function nodeMirrorFormHtml(){ return mirrorFormFields('confirmNodeMirror()','closeNodeMirrorForm()'); }
+function confirmNodeMirror(){
+  const ids=selectedNodes().map(n=>n.id);
+  if(!ids.length){ closeNodeMirrorForm(); return; }
+  const x1=mirX1,y1=mirY1,x2=mirX2,y2=mirY2;
+  if(Math.hypot(x2-x1,y2-y1)<1e-6){ setStatusHint('Podaj dwa różne punkty, aby wyznaczyć linię lustra.'); return; }
+  const phiDeg=lineAngleDeg(x1,y1,x2,y2);
+  const phiRad=phiDeg*Math.PI/180;
+  const nodeSet=new Set(ids);
+  ids.forEach(id=>{
+    const n=getNode(id); if(!n) return;
+    const p=mirrorPoint(n.x,n.y,x1,y1,x2,y2);
+    n.x=Math.round(p.x*1e6)/1e6; n.y=Math.round(p.y*1e6)/1e6;
+    if(n.support){ n.support.angleDeg=normalizeAngle(2*phiDeg-(n.support.angleDeg||0)); }
+    if(n.force){
+      if(n.force.mode==='components'){
+        const v=mirrorVectorComponents(n.force.Fx||0,n.force.Fy||0,phiRad);
+        n.force.Fx=Math.round(v.x*1000)/1000; n.force.Fy=Math.round(v.y*1000)/1000;
+      } else {
+        n.force.angle=normalizeAngle(2*phiDeg-(n.force.angle||0));
+      }
+    }
+    if(n.moment){ n.moment.M=-(n.moment.M||0); } // reflection flips ccw/cw handedness
+  });
+  elements.forEach(e=>{
+    if(!(nodeSet.has(e.n1) && nodeSet.has(e.n2))) return;
+    if(e.q && e.q.mode==='resultant'){ e.q.angle=normalizeAngle(2*phiDeg-(e.q.angle||0)); }
+    if(e.thermal){ const t=e.thermal.dTtop; e.thermal.dTtop=e.thermal.dTbottom; e.thermal.dTbottom=t; }
+    if(e.hingeStart && e.momentHingeStart){ e.momentHingeStart=-e.momentHingeStart; }
+    if(e.hingeEnd && e.momentHingeEnd){ e.momentHingeEnd=-e.momentHingeEnd; }
+  });
+  const finalNodeIds=applyTransformMergePass(ids);
+  const finalElemIds=selection.elemIds.filter(id=>elements.some(e=>e.id===id));
+  nodeMirrorFormOpen=false;
+  selection={nodeIds:finalNodeIds, elemIds:finalElemIds};
   invalidateResults(); renderSidebar(); render();
 }
 
@@ -6372,6 +6846,9 @@ function bulkApplySupportPreset(key){
     else if(key==='pin'){ ux=F();uy=F();rz=Fr(); }
     else if(key==='rollerH'){ ux=Fr();uy=F();rz=Fr(); }
     else if(key==='rollerV'){ ux=F();uy=Fr();rz=Fr(); }
+    else if(key==='guideV'){ ux=F();uy=Fr();rz=F(); }
+    else if(key==='guideH'){ ux=Fr();uy=F();rz=F(); }
+    else if(key==='sleeve'){ ux=Fr();uy=Fr();rz=F(); }
     n.support={angleDeg,ux,uy,rz};
   });
   invalidateResults(); renderSidebar(); render();
