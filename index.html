@@ -4141,14 +4141,31 @@ function drawLoads(){
         // arrow points TOWARD the node in the load direction (tip at node); negative
         // magnitude flips the whole arrow to the opposite side, not just its label.
         const dxs=sign*Math.cos(a), dys=-sign*Math.sin(a); // screen space (y flip)
-        drawArrow(p.x-dxs*len, p.y-dys*len, p.x-dxs*10, p.y-dys*10, FCOLOR);
+        const tailX = p.x-dxs*len, tailY = p.y-dys*len;
+        drawArrow(tailX, tailY, p.x-dxs*10, p.y-dys*10, FCOLOR);
         const txt = fmtSmart(n.force.F)+' kN';
         ctx.font='11px '+FONT_MONO;
         const w = ctx.measureText(txt).width;
-        const tx = p.x-dxs*len+4, ty = p.y-dys*len-4;
+        
+        let align = 'left';
+        let tx = tailX + 4;
+        const ty = tailY - 4;
+        
+        if (dxs > 0.05) {
+          align = 'right';
+          tx = tailX - 4;
+        } else if (dxs < -0.05) {
+          align = 'left';
+          tx = tailX + 4;
+        } else {
+          align = 'left';
+          tx = tailX + 4;
+        }
+        
         ctx.fillStyle = getCss('--badge-bg');
-        ctx.fillRect(tx - 2, ty - 9, w + 4, 13);
-        ctx.fillStyle=FCOLOR; ctx.textAlign='left';
+        ctx.fillRect(align === 'right' ? tx - w - 2 : tx - 2, ty - 9, w + 4, 13);
+        ctx.fillStyle = FCOLOR;
+        ctx.textAlign = align;
         ctx.fillText(txt, tx, ty);
       }
     }
@@ -5444,8 +5461,7 @@ function openAboutModal(){
           <img src="logo64.png" alt="Logo Materia Lite" style="width:56px;height:56px;object-fit:contain;border-radius:12px;background:var(--surface-2);padding:4px;border:1px solid var(--surface-border);flex:0 0 auto;" onerror="this.style.display='none'">
           <div>
             <div style="font-size:17px;font-weight:700;color:var(--text);letter-spacing:-0.01em;">Materia Lite</div>
-            <div style="font-size:12px;color:var(--accent);font-weight:600;">2D MES – Metoda Elementów Skończonych</div>
-            <div class="muted" style="font-size:11px;margin-top:2px;">Statyka, Stateczność i Dynamika Konstrukcji Prętowych</div>
+            <div style="font-size:12px;color:var(--accent);font-weight:600;">Statyka, Stateczność i Dynamika Konstrukcji Prętowych 2D</div>
           </div>
         </div>
 
@@ -8349,7 +8365,7 @@ function bulkUpdateElemT(field,val){
 function panelResults(){
   if(solveWarning && !solved){
     return `<div class="panel"><h3>Wyniki</h3><div class="warn">${solveWarning}</div>
-      <button class="primary-btn" onclick="runAnalysis()">Uruchom obliczenia</button></div>`;
+    </div>`;
   }
   if(!solved){
     return `<div class="panel"><h3>Wyniki</h3><div class="empty-state">Zbuduj model i kliknij <b>OBLICZ</b> w górnym pasku,<br>aby zobaczyć odkształcenia, wykresy M/T/N i naprężenia.</div></div>`;
@@ -8369,7 +8385,7 @@ function panelResults(){
   if(solved.type === 'envelope'){
     return panelEnvelopeResults();
   }
-  let html = `<div class="panel"><h3>Reakcje <span class="tag">rozwiązano</span></h3>`;
+  let html = `<div class="panel"><h3>Reakcje podporowe <span class="tag">rozwiązano</span></h3>`;
   if(solveWarning) html += `<div class="warn">${solveWarning}</div>`;
   html += reactionsTableHtml();
   html += `</div>`;
