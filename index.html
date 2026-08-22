@@ -2313,8 +2313,9 @@ let boxSelectEnabled=false;  // toggle (only shown in 'select' mode): when on, d
 let boxSelectState=null;     // {startX,startY,curX,curY,moved} while a selection-box drag is in progress
 
 /* ---- undo/redo history (model-only snapshots, taken automatically — see checkAndPushHistory) ---- */
-let undoStack=[], redoStack=[], lastSnapshot=null;
+let undoStack=[], redoStack=[], lastSnapshot=null, savedSnapshot=null;
 const MAX_HISTORY=100;
+const STORAGE_MODELS_KEY = 'materia_lite_saved_models';
 
 let solved=null;             // raw solver output
 let diagrams=null;           // per-element sampled arrays for plotting
@@ -2374,10 +2375,14 @@ let currentTheme='light';
 let currentAccent='blue';
 let includeAxialDeformation=true;
 let includeSelfWeight=false;
-let hideLoadsSupportsInResults=false;
+let hideLoadsInResults=false;
+let hideSupportsInResults=false;
 let showBackgroundGrid=true;
 let showIdLabels=false;
+let showSectionNamesOnBars=false;
+let showMaterialNamesOnBars=false;
 let showDimensionLines=false;
+let useFileExportImport=true;
 
 function applyAccentVariables(){
   const def = APP_ACCENTS[currentAccent] || APP_ACCENTS.blue;
@@ -2399,11 +2404,15 @@ function saveAppOptionsToStorage(){
       accent: currentAccent,
       includeAxialDeformation,
       includeSelfWeight,
-      hideLoadsSupportsInResults,
+      hideLoadsInResults,
+      hideSupportsInResults,
       showBackgroundGrid,
       showIdLabels,
+      showSectionNamesOnBars,
+      showMaterialNamesOnBars,
       showDimensionLines,
-      snapSize
+      snapSize,
+      useFileExportImport
     };
     localStorage.setItem(STORAGE_OPTIONS_KEY, JSON.stringify(opts));
   } catch(e){}
@@ -2427,8 +2436,15 @@ function loadAppOptionsFromStorage(){
       if(opts && typeof opts.includeSelfWeight === 'boolean'){
         includeSelfWeight = opts.includeSelfWeight;
       }
-      if(opts && typeof opts.hideLoadsSupportsInResults === 'boolean'){
-        hideLoadsSupportsInResults = opts.hideLoadsSupportsInResults;
+      if(opts && typeof opts.hideLoadsInResults === 'boolean'){
+        hideLoadsInResults = opts.hideLoadsInResults;
+      } else if(opts && typeof opts.hideLoadsSupportsInResults === 'boolean'){
+        hideLoadsInResults = opts.hideLoadsSupportsInResults;
+      }
+      if(opts && typeof opts.hideSupportsInResults === 'boolean'){
+        hideSupportsInResults = opts.hideSupportsInResults;
+      } else if(opts && typeof opts.hideLoadsSupportsInResults === 'boolean'){
+        hideSupportsInResults = opts.hideLoadsSupportsInResults;
       }
       if(opts && typeof opts.showBackgroundGrid === 'boolean'){
         showBackgroundGrid = opts.showBackgroundGrid;
@@ -2436,11 +2452,20 @@ function loadAppOptionsFromStorage(){
       if(opts && typeof opts.showIdLabels === 'boolean'){
         showIdLabels = opts.showIdLabels;
       }
+      if(opts && typeof opts.showSectionNamesOnBars === 'boolean'){
+        showSectionNamesOnBars = opts.showSectionNamesOnBars;
+      }
+      if(opts && typeof opts.showMaterialNamesOnBars === 'boolean'){
+        showMaterialNamesOnBars = opts.showMaterialNamesOnBars;
+      }
       if(opts && typeof opts.showDimensionLines === 'boolean'){
         showDimensionLines = opts.showDimensionLines;
       }
       if(opts && typeof opts.snapSize === 'number' && opts.snapSize > 0){
         snapSize = opts.snapSize;
+      }
+      if(opts && typeof opts.useFileExportImport === 'boolean'){
+        useFileExportImport = opts.useFileExportImport;
       }
     }
   } catch(e){}
@@ -4601,7 +4626,8 @@ function render(){
   const isInfluence = solved && solved.type==='influence';
   const isEnvelope = solved && solved.type==='envelope';
   const showingResults = showDeform||showM||showT||showN||showStress||showReactions;
-  const hideLS = hideLoadsSupportsInResults && showingResults;
+  const hideLoads = hideLoadsInResults && showingResults;
+  const hideSupports = hideSupportsInResults && showingResults;
   if(showDeform && !isInfluence && !isEnvelope) drawDeformedShape();
   drawElements();
   if(isInfluence){
@@ -4619,10 +4645,10 @@ function render(){
     if(showM) drawDiagramType('M');
     if(showStress) drawDiagramType('S');
   }
-  if(!hideLS) drawSupports();
-  if(!hideLS && !isEnvelope) drawLoads();
+  if(!hideSupports) drawSupports();
+  if(!hideLoads && !isEnvelope) drawLoads();
   drawNodes();
-  if(showIdLabels) drawIdLabels();
+  if(showIdLabels || showSectionNamesOnBars || showMaterialNamesOnBars) drawIdLabels();
   if(showReactions && !isInfluence) drawReactions();
   drawILSectionMarker();
   if(probe.elId!=null && (diagrams || (isInfluence && ilDiagrams) || (isEnvelope && solved && solved.envelopeData))) drawProbeMarker();
@@ -4634,12 +4660,25 @@ function render(){
 function drawIdLabels(){
   ctx.font='10px '+FONT_MONO;
   elements.forEach(el=>{
+    const parts = [];
+    if(showIdLabels) parts.push('P' + el.id);
+    if(showSectionNamesOnBars){
+      const sec = getSection(el.sectionId);
+      parts.push(sec ? sec.name : '—');
+    }
+    if(showMaterialNamesOnBars){
+      const mat = getMaterial(el.materialId);
+      parts.push(mat ? mat.name : '—');
+    }
+    if(parts.length === 0) return;
+
+    const label = parts.join(', ');
     const a=getNode(el.n1), b=getNode(el.n2);
+    if(!a || !b) return;
     const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
     const p=toScreen(mx,my);
-    const label = 'P'+el.id;
     const w = ctx.measureText(label).width;
-    const padH = 3, h = 12;
+    const padH = 4, h = 13;
     ctx.fillStyle=getCss('--badge-bg');
     ctx.fillRect(p.x - w/2 - padH, p.y - h/2, w + 2*padH, h);
     ctx.fillStyle=getCss('--accent-dark');
@@ -4647,18 +4686,20 @@ function drawIdLabels(){
     ctx.textBaseline='middle';
     ctx.fillText(label, p.x, p.y);
   });
-  nodes.forEach(n=>{
-    const p=toScreen(n.x,n.y);
-    const label = 'W'+n.id;
-    const w = ctx.measureText(label).width;
-    const padH = 3, h = 12;
-    ctx.fillStyle=getCss('--badge-bg');
-    ctx.fillRect(p.x + 7, p.y - 14, w + 2*padH, h);
-    ctx.fillStyle=getCss('--ink');
-    ctx.textAlign='left';
-    ctx.textBaseline='middle';
-    ctx.fillText(label, p.x + 7 + padH, p.y - 8);
-  });
+  if(showIdLabels){
+    nodes.forEach(n=>{
+      const p=toScreen(n.x,n.y);
+      const label = 'W'+n.id;
+      const w = ctx.measureText(label).width;
+      const padH = 3, h = 12;
+      ctx.fillStyle=getCss('--badge-bg');
+      ctx.fillRect(p.x + 7, p.y - 14, w + 2*padH, h);
+      ctx.fillStyle=getCss('--ink');
+      ctx.textAlign='left';
+      ctx.textBaseline='middle';
+      ctx.fillText(label, p.x + 7 + padH, p.y - 8);
+    });
+  }
 }
 
 /* ---- tymczasowe podglądy: współrzędne węzła + linie wymiarowe pręta ----
@@ -5178,8 +5219,8 @@ function buildToolbar(){
     <!-- Grupa 1: Nowy, Wczytaj, Zapisz, Cofnij, Ponów, Opcje -->
     <div class="tb-group">
       <button class="tb-btn" id="btnNew" title="Nowy model">${ICONS.neu}<span>Nowy</span></button>
-      <button class="tb-btn" id="btnImport" title="Importuj JSON">${ICONS.ul}<span>Wczytaj</span></button>
-      <button class="tb-btn" id="btnExport" title="Eksportuj JSON">${ICONS.dl}<span>Zapisz</span></button>
+      <button class="tb-btn" id="btnImport" title="${useFileExportImport ? 'Wczytaj plik JSON z dysku' : 'Wczytaj model z pamięci przeglądarki'}">${ICONS.ul}<span>Wczytaj</span></button>
+      <button class="tb-btn" id="btnExport" title="${useFileExportImport ? 'Zapisz model do pliku JSON' : 'Zapisz model w pamięci przeglądarki'}">${ICONS.dl}<span>Zapisz</span></button>
       <button class="tb-btn" id="btnUndo" title="Cofnij (Ctrl+Z)" disabled>${ICONS.undo}<span>Cofnij</span></button>
       <button class="tb-btn" id="btnRedo" title="Ponów (Ctrl+Y)" disabled>${ICONS.redo}<span>Ponów</span></button>
       <button class="tb-btn" id="btnOptions" title="Opcje programu">${ICONS.gear}<span>Opcje</span></button>
@@ -5212,8 +5253,8 @@ function buildToolbar(){
   });
   document.getElementById('btnNew').addEventListener('click', newModel);
   document.getElementById('btnRun').addEventListener('click', toggleSolveOrBack);
-  document.getElementById('btnExport').addEventListener('click', exportModel);
-  document.getElementById('btnImport').addEventListener('click', ()=>document.getElementById('fileImport').click());
+  document.getElementById('btnExport').addEventListener('click', handleSaveAction);
+  document.getElementById('btnImport').addEventListener('click', handleLoadAction);
   document.getElementById('fileImport').addEventListener('change', importModelFile);
   document.getElementById('btnUndo').addEventListener('click', doUndo);
   document.getElementById('btnRedo').addEventListener('click', doRedo);
@@ -5318,7 +5359,7 @@ function openOptionsModal(){
   overlay.style.cssText='position:fixed;inset:0;background:#0f172a99;z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;';
   overlay.innerHTML=`
     <div id="optionsCard" style="background:var(--sidebar-bg);color:var(--text);border-radius:12px;max-width:440px;width:100%;max-height:86vh;overflow-y:auto;box-shadow:0 20px 60px #0008;">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--sidebar-border);position:sticky;top:0;background:var(--sidebar-bg);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--sidebar-border);position:sticky;top:0;background:var(--sidebar-bg);z-index:2;">
         <h2 style="margin:0;font-size:14.5px;">Opcje programu</h2>
         <button id="optionsCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-dim);line-height:1;padding:4px;">✕</button>
       </div>
@@ -5329,11 +5370,18 @@ function openOptionsModal(){
           'Gdy wyłączone, pręty są przyjmowane jako praktycznie nierozciągliwe/nieściśliwe wzdłuż swojej osi (sztywność EA jest sztucznie zwiększana) — sztywność zginania (EI) i naprężenia pozostają liczone na rzeczywistym przekroju. Wymaga ponownego uruchomienia obliczeń.')}
         ${optionRowToggle('selfWeightOpt','Uwzględnij ciężar własny prętów', includeSelfWeight,
           'Dolicza do każdego pręta niewidoczne na rysunku obciążenie ciągłe pionowe = gęstość materiału × pole przekroju × g. Gęstość materiału ustawia się w bibliotece materiałów. Wymaga ponownego uruchomienia obliczeń.')}
-        ${optionRowToggle('hideLSOpt','Ukryj obciążenia i podpory przy wynikach', hideLoadsSupportsInResults,
-          'Czysto wizualne — chowa strzałki sił i symbole podpór, gdy widoczny jest przynajmniej jeden wykres wyników (odkształcenie, N, T, M, σ lub reakcje).')}
+        ${optionRowToggle('hideLoadsOpt','Ukryj obciążenia przy wynikach', hideLoadsInResults,
+          'Czysto wizualne — chowa strzałki obciążeń, gdy widoczny jest przynajmniej jeden wykres wyników (odkształcenie, N, T, M, σ lub reakcje).')}
+        ${optionRowToggle('hideSupportsOpt','Ukryj podpory przy wynikach', hideSupportsInResults,
+          'Czysto wizualne — chowa symbole podpór, gdy widoczny jest przynajmniej jeden wykres wyników (odkształcenie, N, T, M, σ lub reakcje).')}
         ${optionRowToggle('gridOpt','Pokaż siatkę tła', showBackgroundGrid, '')}
         ${optionRowToggle('labelsOpt','Pokaż numery węzłów i prętów', showIdLabels, '')}
+        ${optionRowToggle('secLabelsOpt','Pokaż nazwę przekroju na pręcie', showSectionNamesOnBars, 'Wyświetla nazwę przypisanego przekroju na etykiecie pręta.')}
+        ${optionRowToggle('matLabelsOpt','Pokaż nazwę materiałów na pręcie', showMaterialNamesOnBars, 'Wyświetla nazwę przypisanego materiału na etykiecie pręta.')}
         ${optionRowToggle('dimLinesOpt','Linie wymiarowe', showDimensionLines, 'Rysuje poziome linie wymiarowe pod modelem oraz pionowe linie wymiarowe z prawej strony modelu między węzłami.')}
+        <hr class="sep">
+        ${optionRowToggle('storageModeOpt','Zapisywanie i wczytywanie modeli jako eksport i import plików .json', useFileExportImport,
+          'Gdy włączone, przyciski Zapisz/Wczytaj pobierają i otwierają pliki .json z dysku komputera. Gdy wyłączone, modele zapisywane i wczytywane są bezpośrednio w pamięci przeglądarki (localStorage).')}
         <div style="margin-top:14px;margin-bottom:14px;">
           <div class="row" style="margin-bottom:0;">
             <span style="font-size:12.5px;font-weight:600;flex:1;min-width:0;">Krok dociągania węzłów do siatki</span>
@@ -5361,10 +5409,14 @@ function openOptionsModal(){
   });
   document.getElementById('axialOpt').addEventListener('change',(e)=>{ includeAxialDeformation=e.target.checked; saveAppOptionsToStorage(); invalidateResults(); renderSidebar(); render(); });
   document.getElementById('selfWeightOpt').addEventListener('change',(e)=>{ includeSelfWeight=e.target.checked; saveAppOptionsToStorage(); invalidateResults(); renderSidebar(); render(); });
-  document.getElementById('hideLSOpt').addEventListener('change',(e)=>{ hideLoadsSupportsInResults=e.target.checked; saveAppOptionsToStorage(); render(); });
+  document.getElementById('hideLoadsOpt').addEventListener('change',(e)=>{ hideLoadsInResults=e.target.checked; saveAppOptionsToStorage(); render(); });
+  document.getElementById('hideSupportsOpt').addEventListener('change',(e)=>{ hideSupportsInResults=e.target.checked; saveAppOptionsToStorage(); render(); });
   document.getElementById('gridOpt').addEventListener('change',(e)=>{ showBackgroundGrid=e.target.checked; saveAppOptionsToStorage(); render(); });
   document.getElementById('labelsOpt').addEventListener('change',(e)=>{ showIdLabels=e.target.checked; saveAppOptionsToStorage(); render(); });
+  document.getElementById('secLabelsOpt').addEventListener('change',(e)=>{ showSectionNamesOnBars=e.target.checked; saveAppOptionsToStorage(); render(); });
+  document.getElementById('matLabelsOpt').addEventListener('change',(e)=>{ showMaterialNamesOnBars=e.target.checked; saveAppOptionsToStorage(); render(); });
   document.getElementById('dimLinesOpt').addEventListener('change',(e)=>{ showDimensionLines=e.target.checked; saveAppOptionsToStorage(); render(); });
+  document.getElementById('storageModeOpt').addEventListener('change',(e)=>{ useFileExportImport=e.target.checked; saveAppOptionsToStorage(); buildToolbar(); });
   document.getElementById('snapSizeOpt').addEventListener('change',(e)=>{
     const val = parseFloat(e.target.value);
     if(!isNaN(val) && val > 0){
@@ -5430,7 +5482,7 @@ function openAboutModal(){
             Licencja i dostępność
           </div>
           <div style="font-size:11.5px;color:var(--text-dim);line-height:1.45;">
-            Program jest <strong>darmowy</strong> i udostępniany do celów edukacyjnych oraz inżynierskich. Dostępny bezpłatnie na <a href="https://wbia.pollub.pl/wydzial/struktura-wydzialu/katedra-mechaniki-budowli/pracownicy/jakub-gontarz">mojej stronie internetowej</a>.
+            Program jest <strong>darmowy</strong> i udostępniany do celów edukacyjnych oraz inżynierskich. Dostępny bezpłatnie na <a href="https://wbia.pollub.pl/wydzial/struktura-wydzialu/katedra-mechaniki-budowli/pracownicy/jakub-gontarz">stronie internetowej autora</a>.
           </div>
         </div>
 
@@ -5451,21 +5503,117 @@ function openAboutModal(){
   document.body.appendChild(overlay);
   overlay.addEventListener('click',(e)=>{ if(e.target===overlay) closeAboutModal(); });
   document.getElementById('aboutCloseBtn').addEventListener('click', closeAboutModal);
-  document.getElementById('aboutOkBtn').addEventListener('click', closeAboutModal);
 }
 function closeAboutModal(){ const o=document.getElementById('aboutOverlay'); if(o) o.remove(); }
 
+function hasUnsavedChanges(){
+  const cur = modelSnapshot();
+  if(savedSnapshot === null){
+    return nodes.length > 0 || elements.length > 0;
+  }
+  return cur !== savedSnapshot;
+}
+
+function promptUnsavedChanges(onProceed, onSaveFirst){
+  if(!hasUnsavedChanges()){
+    onProceed();
+    return;
+  }
+  closeConfirmUnsavedModal();
+  const overlay=document.createElement('div');
+  overlay.id='confirmUnsavedOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:#0f172a99;z-index:400;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML=`
+    <div style="background:var(--sidebar-bg);color:var(--text);border-radius:12px;max-width:400px;width:100%;box-shadow:0 20px 60px #0008;border:1px solid var(--sidebar-border);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--sidebar-border);">
+        <h3 style="margin:0;font-size:14.5px;font-weight:600;">Niezapisane zmiany</h3>
+        <button id="unsavedCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-dim);line-height:1;padding:4px;">✕</button>
+      </div>
+      <div style="padding:16px 18px;font-size:12.5px;line-height:1.5;">
+        <p style="margin:0 0 14px 0;">Model zawiera niezapisane zmiany. Czy chcesz zapisać model przed kontynuowaniem?</p>
+        <div class="btnrow" style="justify-content:flex-end;gap:8px;">
+          <button class="mini" id="unsavedCancelBtn">Anuluj</button>
+          <button class="mini" id="unsavedDiscardBtn" style="color:var(--danger, #ef4444);">Odrzuć zmiany</button>
+          <button class="mini on" id="unsavedSaveBtn">Zapisz model</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',(e)=>{ if(e.target===overlay) closeConfirmUnsavedModal(); });
+  document.getElementById('unsavedCloseBtn').addEventListener('click', closeConfirmUnsavedModal);
+  document.getElementById('unsavedCancelBtn').addEventListener('click', closeConfirmUnsavedModal);
+  document.getElementById('unsavedDiscardBtn').addEventListener('click', ()=>{
+    closeConfirmUnsavedModal();
+    onProceed();
+  });
+  document.getElementById('unsavedSaveBtn').addEventListener('click', ()=>{
+    closeConfirmUnsavedModal();
+    if(onSaveFirst){
+      onSaveFirst();
+    } else {
+      exportModel();
+    }
+  });
+}
+function closeConfirmUnsavedModal(){
+  const o=document.getElementById('confirmUnsavedOverlay');
+  if(o) o.remove();
+}
+
 function newModel(){
-  nodes=[]; elements=[]; nextNodeId=1; nextElemId=1;
-  analysisSettings = { type: 'linear_static', params: { bucklingModes: 4 } };
-  clearSelection(); invalidateResults();
-  fitView(); setMode('select'); renderSidebar(); render();
+  promptUnsavedChanges(()=>{
+    nodes=[]; elements=[]; nextNodeId=1; nextElemId=1;
+    analysisSettings = { type: 'linear_static', params: { bucklingModes: 4 } };
+    undoStack=[]; redoStack=[];
+    clearSelection(); invalidateResults();
+    lastSnapshot = modelSnapshot();
+    savedSnapshot = lastSnapshot;
+    fitView(); setMode('select'); renderSidebar(); render();
+    setStatusHint('Utworzono nowy pusty model.');
+  });
 }
 
 /* =========================================================================
-   EXPORT / IMPORT
+   EXPORT / IMPORT / LOCAL STORAGE MODELS
    ========================================================================= */
 let currentModelFileName = 'model-mes-2d';
+
+function getStoredModelsList(){
+  try {
+    const raw = localStorage.getItem(STORAGE_MODELS_KEY);
+    if(raw){
+      const arr = JSON.parse(raw);
+      if(Array.isArray(arr)) return arr;
+    }
+  } catch(e){}
+  return [];
+}
+
+function saveStoredModelsList(list){
+  try {
+    localStorage.setItem(STORAGE_MODELS_KEY, JSON.stringify(list));
+  } catch(e){}
+}
+
+function handleSaveAction(){
+  if(useFileExportImport){
+    openExportModal();
+  } else {
+    openSaveLocalModal();
+  }
+}
+
+function handleLoadAction(){
+  if(useFileExportImport){
+    promptUnsavedChanges(()=>{
+      document.getElementById('fileImport').click();
+    });
+  } else {
+    promptUnsavedChanges(()=>{
+      openLoadLocalModal();
+    });
+  }
+}
 
 function openExportModal(){
   closeExportModal();
@@ -5511,12 +5659,11 @@ function closeExportModal(){ const o=document.getElementById('exportOverlay'); i
 function confirmExport(){
   const inp=document.getElementById('exportFileNameInput');
   let rawName = inp ? (inp.value.trim() || 'model-mes-2d') : 'model-mes-2d';
-  // usunięcie ewentualnego podwójnego rozszerzenia .json wpisanego przez użytkownika
   if(rawName.toLowerCase().endsWith('.json')){
     rawName = rawName.slice(0, -5);
   }
   rawName = rawName || 'model-mes-2d';
-  currentModelFileName = rawName; // zapamiętanie wpisanej nazwy na przyszłość
+  currentModelFileName = rawName;
   const fileName = currentModelFileName + '.json';
   closeExportModal();
 
@@ -5537,12 +5684,14 @@ function confirmExport(){
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=fileName; a.click();
   URL.revokeObjectURL(url);
+  savedSnapshot = modelSnapshot();
   setStatusHint(`Pobrano plik: ${fileName}`);
 }
 
 function exportModel(){
-  openExportModal();
+  handleSaveAction();
 }
+
 function importModelFile(e){
   const file=e.target.files[0]; if(!file) return;
   const reader=new FileReader();
@@ -5565,12 +5714,292 @@ function importModelFile(e){
       if(file.name){
         currentModelFileName = file.name.replace(/\.json$/i, '') || 'model-mes-2d';
       }
+      undoStack=[]; redoStack=[];
       invalidateResults(); clearSelection();
+      lastSnapshot = modelSnapshot();
+      savedSnapshot = lastSnapshot;
       fitView(); buildToolbar(); renderSidebar(); render();
+      setStatusHint(`Wczytano model z pliku: ${file.name}`);
     }catch(err){ setStatusHint('Błąd wczytywania pliku: '+err.message); }
   };
   reader.readAsText(file);
   e.target.value='';
+}
+
+/* Local storage modal save/load */
+function openSaveLocalModal(){
+  closeSaveLocalModal();
+  const overlay=document.createElement('div');
+  overlay.id='saveLocalOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:#0f172a99;z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML=`
+    <div style="background:var(--sidebar-bg);color:var(--text);border-radius:12px;max-width:390px;width:100%;box-shadow:0 20px 60px #0008;border:1px solid var(--sidebar-border);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--sidebar-border);">
+        <h2 style="margin:0;font-size:14.5px;font-weight:600;">Zapisz w pamięci przeglądarki</h2>
+        <button id="saveLocalCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-dim);line-height:1;padding:4px;">✕</button>
+      </div>
+      <div style="padding:16px 18px;font-size:12.5px;">
+        <div class="row" style="margin-bottom:12px;">
+          <label style="min-width:90px;">Nazwa modelu</label>
+          <input type="text" id="saveLocalNameInput" value="${currentModelFileName.replace(/"/g, '&quot;')}" style="flex:1;" autofocus>
+        </div>
+        <div class="muted" style="margin-bottom:14px;">Model zostanie zapisany w pamięci Twojej przeglądarki (localStorage).</div>
+        <div class="btnrow" style="justify-content:flex-end;gap:8px;">
+          <button class="mini" id="saveLocalCancelBtn">Anuluj</button>
+          <button class="mini on" id="saveLocalConfirmBtn">Zapisz</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',(e)=>{ if(e.target===overlay) closeSaveLocalModal(); });
+  document.getElementById('saveLocalCloseBtn').addEventListener('click', closeSaveLocalModal);
+  document.getElementById('saveLocalCancelBtn').addEventListener('click', closeSaveLocalModal);
+  document.getElementById('saveLocalConfirmBtn').addEventListener('click', confirmSaveLocal);
+  const inp=document.getElementById('saveLocalNameInput');
+  if(inp){
+    inp.focus();
+    inp.select();
+    inp.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter'){ e.preventDefault(); confirmSaveLocal(); }
+      if(e.key==='Escape'){ e.preventDefault(); closeSaveLocalModal(); }
+    });
+  }
+}
+function closeSaveLocalModal(){
+  const o=document.getElementById('saveLocalOverlay');
+  if(o) o.remove();
+}
+
+function escapeHtml(str){
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function promptOverwriteConfirm(name, onOverwrite, onCancel){
+  closeConfirmOverwriteModal();
+  const overlay=document.createElement('div');
+  overlay.id='confirmOverwriteOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:#0f172a99;z-index:450;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML=`
+    <div style="background:var(--sidebar-bg);color:var(--text);border-radius:12px;max-width:390px;width:100%;box-shadow:0 20px 60px #0008;border:1px solid var(--sidebar-border);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--sidebar-border);">
+        <h3 style="margin:0;font-size:14.5px;font-weight:600;">Nadpisanie modelu</h3>
+        <button id="overwriteCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-dim);line-height:1;padding:4px;">✕</button>
+      </div>
+      <div style="padding:16px 18px;font-size:12.5px;line-height:1.5;">
+        <p style="margin:0 0 14px 0;">Model o nazwie <strong>&bdquo;${escapeHtml(name)}&rdquo;</strong> już istnieje w pamięci przeglądarki.<br>Czy chcesz go nadpisać?</p>
+        <div class="btnrow" style="justify-content:flex-end;gap:8px;">
+          <button class="mini" id="overwriteCancelBtn">Anuluj</button>
+          <button class="mini on" id="overwriteConfirmBtn">Nadpisz</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',(e)=>{ if(e.target===overlay){ closeConfirmOverwriteModal(); if(onCancel) onCancel(); } });
+  document.getElementById('overwriteCloseBtn').addEventListener('click', ()=>{ closeConfirmOverwriteModal(); if(onCancel) onCancel(); });
+  document.getElementById('overwriteCancelBtn').addEventListener('click', ()=>{ closeConfirmOverwriteModal(); if(onCancel) onCancel(); });
+  document.getElementById('overwriteConfirmBtn').addEventListener('click', ()=>{
+    closeConfirmOverwriteModal();
+    if(onOverwrite) onOverwrite();
+  });
+}
+function closeConfirmOverwriteModal(){
+  const o=document.getElementById('confirmOverwriteOverlay');
+  if(o) o.remove();
+}
+
+function promptDeleteConfirm(name, onDelete){
+  closeConfirmDeleteModal();
+  const overlay=document.createElement('div');
+  overlay.id='confirmDeleteOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:#0f172a99;z-index:450;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML=`
+    <div style="background:var(--sidebar-bg);color:var(--text);border-radius:12px;max-width:390px;width:100%;box-shadow:0 20px 60px #0008;border:1px solid var(--sidebar-border);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--sidebar-border);">
+        <h3 style="margin:0;font-size:14.5px;font-weight:600;">Usunięcie modelu</h3>
+        <button id="delModalCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-dim);line-height:1;padding:4px;">✕</button>
+      </div>
+      <div style="padding:16px 18px;font-size:12.5px;line-height:1.5;">
+        <p style="margin:0 0 14px 0;">Czy na pewno chcesz usunąć model <strong>&bdquo;${escapeHtml(name)}&rdquo;</strong> z pamięci przeglądarki?</p>
+        <div class="btnrow" style="justify-content:flex-end;gap:8px;">
+          <button class="mini" id="delModalCancelBtn">Anuluj</button>
+          <button class="mini" id="delModalConfirmBtn" style="color:var(--danger, #ef4444);font-weight:600;">Usuń</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',(e)=>{ if(e.target===overlay) closeConfirmDeleteModal(); });
+  document.getElementById('delModalCloseBtn').addEventListener('click', closeConfirmDeleteModal);
+  document.getElementById('delModalCancelBtn').addEventListener('click', closeConfirmDeleteModal);
+  document.getElementById('delModalConfirmBtn').addEventListener('click', ()=>{
+    closeConfirmDeleteModal();
+    if(onDelete) onDelete();
+  });
+}
+function closeConfirmDeleteModal(){
+  const o=document.getElementById('confirmDeleteOverlay');
+  if(o) o.remove();
+}
+
+function confirmSaveLocal(){
+  const inp=document.getElementById('saveLocalNameInput');
+  let name = inp ? (inp.value.trim() || 'model-mes-2d') : 'model-mes-2d';
+  if(name.toLowerCase().endsWith('.json')){
+    name = name.slice(0, -5);
+  }
+  name = name || 'model-mes-2d';
+  const list = getStoredModelsList();
+  const existingIndex = list.findIndex(m => m.name.toLowerCase() === name.toLowerCase());
+
+  const doSave = (targetIndex) => {
+    currentModelFileName = name;
+    const modelData = {
+      nodes,
+      elements,
+      materials,
+      sections,
+      analysisSettings: analysisSettings || { type: 'linear_static', params: { bucklingModes: 4 } },
+      nextNodeId,
+      nextElemId,
+      nextMatId,
+      nextSecId,
+      defaultSectionId,
+      defaultMaterialId
+    };
+
+    const record = {
+      id: (targetIndex >= 0 ? list[targetIndex].id : 'm_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6)),
+      name: name,
+      updatedAt: new Date().toISOString(),
+      nodesCount: nodes.length,
+      elementsCount: elements.length,
+      data: modelData
+    };
+
+    if(targetIndex >= 0){
+      list[targetIndex] = record;
+    } else {
+      list.unshift(record);
+    }
+    saveStoredModelsList(list);
+    savedSnapshot = modelSnapshot();
+    closeSaveLocalModal();
+    setStatusHint(`Zapisano model "${name}" w pamięci lokalnej.`);
+  };
+
+  if(existingIndex >= 0){
+    promptOverwriteConfirm(name, ()=>{
+      doSave(existingIndex);
+    });
+  } else {
+    doSave(-1);
+  }
+}
+
+function openLoadLocalModal(){
+  closeLoadLocalModal();
+  const list = getStoredModelsList();
+  const overlay=document.createElement('div');
+  overlay.id='loadLocalOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:#0f172a99;z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;';
+  
+  let listHtml = '';
+  if(list.length === 0){
+    listHtml = `<div class="muted" style="padding:24px 0;text-align:center;">Brak zapisanych modeli w pamięci przeglądarki.</div>`;
+  } else {
+    listHtml = `<div style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin:10px 0 16px;">
+      ${list.map(m => {
+        const d = new Date(m.updatedAt || Date.now());
+        const dateStr = d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        return `<div class="local-model-row" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--surface);border:1px solid var(--surface-border);border-radius:8px;gap:10px;">
+          <div style="flex:1;min-width:0;cursor:pointer;" class="local-model-select" data-id="${m.id}">
+            <div style="font-weight:600;font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m.name}</div>
+            <div class="muted" style="font-size:10.5px;margin-top:2px;">Węzłów: ${m.nodesCount ?? (m.data?.nodes?.length||0)}, Prętów: ${m.elementsCount ?? (m.data?.elements?.length||0)} • ${dateStr}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex:0 0 auto;">
+            <button class="mini on local-model-load-btn" data-id="${m.id}" title="Wczytaj ten model" style="padding:4px 8px;font-size:11px;">Wczytaj</button>
+            <button class="mini local-model-del-btn" data-id="${m.id}" title="Usuń z pamięci" style="padding:4px 7px;font-size:11px;color:var(--danger, #ef4444);"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  overlay.innerHTML=`
+    <div style="background:var(--sidebar-bg);color:var(--text);border-radius:12px;max-width:440px;width:100%;box-shadow:0 20px 60px #0008;border:1px solid var(--sidebar-border);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--sidebar-border);">
+        <h2 style="margin:0;font-size:14.5px;font-weight:600;">Wczytaj model z pamięci</h2>
+        <button id="loadLocalCloseBtn" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-dim);line-height:1;padding:4px;">✕</button>
+      </div>
+      <div style="padding:16px 18px;font-size:12.5px;">
+        ${listHtml}
+        <div class="btnrow" style="justify-content:flex-end;">
+          <button class="mini" id="loadLocalCancelBtn">Zamknij</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',(e)=>{ if(e.target===overlay) closeLoadLocalModal(); });
+  document.getElementById('loadLocalCloseBtn').addEventListener('click', closeLoadLocalModal);
+  document.getElementById('loadLocalCancelBtn').addEventListener('click', closeLoadLocalModal);
+
+  overlay.querySelectorAll('.local-model-load-btn').forEach(b => {
+    b.addEventListener('click', ()=>loadLocalModelById(b.dataset.id));
+  });
+  overlay.querySelectorAll('.local-model-select').forEach(b => {
+    b.addEventListener('click', ()=>loadLocalModelById(b.dataset.id));
+  });
+  overlay.querySelectorAll('.local-model-del-btn').forEach(b => {
+    b.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      deleteLocalModelById(b.dataset.id);
+    });
+  });
+}
+function closeLoadLocalModal(){
+  const o=document.getElementById('loadLocalOverlay');
+  if(o) o.remove();
+}
+
+function loadLocalModelById(id){
+  const list = getStoredModelsList();
+  const item = list.find(m => m.id === id);
+  if(!item || !item.data) return;
+  const data = item.data;
+  closeLoadLocalModal();
+
+  nodes=data.nodes||[]; elements=data.elements||[];
+  materials=data.materials||materials; sections=data.sections||sections;
+  if(data.analysisSettings && typeof data.analysisSettings === 'object'){
+    analysisSettings = {
+      type: data.analysisSettings.type || 'linear_static',
+      params: Object.assign({ bucklingModes: 4 }, data.analysisSettings.params || {})
+    };
+  } else {
+    analysisSettings = { type: 'linear_static', params: { bucklingModes: 4 } };
+  }
+  nextNodeId=data.nextNodeId||uid(nodes); nextElemId=data.nextElemId||uid(elements);
+  nextMatId=data.nextMatId||uid(materials); nextSecId=data.nextSecId||uid(sections);
+  defaultSectionId=data.defaultSectionId||sections[0].id; defaultMaterialId=data.defaultMaterialId||materials[0].id;
+  currentModelFileName = item.name || 'model-mes-2d';
+
+  undoStack=[]; redoStack=[];
+  invalidateResults(); clearSelection();
+  lastSnapshot = modelSnapshot();
+  savedSnapshot = lastSnapshot;
+  fitView(); buildToolbar(); renderSidebar(); render();
+  setStatusHint(`Wczytano model "${item.name}" z pamięci lokalnej.`);
+}
+
+function deleteLocalModelById(id){
+  let list = getStoredModelsList();
+  const item = list.find(m => m.id === id);
+  if(!item) return;
+  promptDeleteConfirm(item.name, ()=>{
+    list = list.filter(m => m.id !== id);
+    saveStoredModelsList(list);
+    openLoadLocalModal();
+  });
 }
 
 /* =========================================================================
