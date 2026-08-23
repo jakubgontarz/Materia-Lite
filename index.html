@@ -6454,7 +6454,6 @@ function handlePointerDown(px,py){
     const nid=hitTestNode(px,py);
     if(nid!=null){
       const nodeObj = getNode(nid);
-      selection={nodeIds:[nid],elemIds:[]};
       dragNode=nid;
       dragNodeState={
         nodeId: nid,
@@ -6464,28 +6463,15 @@ function handlePointerDown(px,py){
         origY: nodeObj ? nodeObj.y : 0,
         moved: false
       };
-      renderSidebar();
-      render();
       return;
-    }
-    const eid=hitTestElement(px,py);
-    if(eid!=null){
-      selection={nodeIds:[],elemIds:[eid]};
-      probe.elId=eid;
-      probe.t=projectOnElement(eid,px,py);
-      renderSidebar(); render(); return;
     }
     if(boxSelectEnabled){
       // empty area + box-select toggle ON: start a rubber-band drag instead of panning.
       // Whether it ends up being a box-select or just a deselect-tap is decided on pointer-up.
-      clearSelection();
       boxSelectState={startX:px,startY:py,curX:px,curY:py,moved:false};
-      renderSidebar(); render();
       return;
     }
-    clearSelection();
-    panState={startX:px,startY:py,startOffX:view.offX,startOffY:view.offY,moved:false};
-    renderSidebar(); render();
+    panState={startX:px,startY:py,startOffX:view.offX,startOffY:view.offY,moved:false,tapMode:'select'};
   } else if(mode==='addBar'){
     // Defer the actual action to pointer-up: a drag from here should pan the view
     // (and, mid-pinch, get cleared entirely by onTouchStart) rather than immediately
@@ -6495,7 +6481,24 @@ function handlePointerDown(px,py){
 }
 function performTapAction(tapMode,px,py){
   const mp=toModel(px,py);
-  if(tapMode==='addBar'){
+  if(tapMode==='select'){
+    const nid=hitTestNode(px,py);
+    if(nid!=null){
+      selection={nodeIds:[nid],elemIds:[]};
+      renderSidebar(); render();
+      return;
+    }
+    const eid=hitTestElement(px,py);
+    if(eid!=null){
+      selection={nodeIds:[],elemIds:[eid]};
+      probe.elId=eid;
+      probe.t=projectOnElement(eid,px,py);
+      renderSidebar(); render();
+      return;
+    }
+    clearSelection();
+    renderSidebar(); render();
+  } else if(tapMode==='addBar'){
     const nid=hitTestNode(px,py);
     if(nid==null && !allowNewNodesInBarMode){
       setStatusHint('Tryb: Rysuj — „Auto-węzeł” wyłączony: kliknij istniejący węzeł');
@@ -6679,6 +6682,9 @@ function handlePointerUp(){
       if(!mergedTargetId){
         setStatusHint(selectModeHint());
       }
+    } else {
+      selection = {nodeIds:[draggedId], elemIds:[]};
+      setStatusHint(selectModeHint());
     }
     renderSidebar(); render();
   }
@@ -6688,6 +6694,8 @@ function handlePointerUp(){
       const y0=Math.min(boxSelectState.startY,boxSelectState.curY), y1=Math.max(boxSelectState.startY,boxSelectState.curY);
       const isWindow = boxSelectState.curX >= boxSelectState.startX; // left->right = window (full containment), right->left = crossing (any overlap)
       applyBoxSelection(x0,y0,x1,y1,isWindow);
+    } else {
+      performTapAction('select', boxSelectState.startX, boxSelectState.startY);
     }
     boxSelectState=null;
     renderSidebar(); render();
