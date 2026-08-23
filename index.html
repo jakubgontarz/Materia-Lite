@@ -2494,10 +2494,45 @@ function selectedNodes(){ return selection.nodeIds.map(getNode).filter(Boolean);
 function selectedElements(){ return selection.elemIds.map(getElement).filter(Boolean); }
 function isNodeSelected(id){ return selection.nodeIds.includes(id); }
 function isElementSelected(id){ return selection.elemIds.includes(id); }
-function clearSelection(){ selection={nodeIds:[], elemIds:[]}; }
+function clearSelection(){
+  selection={nodeIds:[], elemIds:[]};
+  closeAllInlineForms();
+}
 function pruneSelection(){
   selection.nodeIds = selection.nodeIds.filter(id=>getNode(id));
   selection.elemIds = selection.elemIds.filter(id=>getElement(id));
+  syncInlineFormsWithSelection();
+}
+function syncInlineFormsWithSelection(){
+  const nSelCount = selection.nodeIds.filter(id=>getNode(id)).length;
+  const eSelCount = selection.elemIds.filter(id=>getElement(id)).length;
+
+  if(nSelCount === 0){
+    moveFormOpen = false;
+    nodeRotateFormOpen = false;
+    nodeMirrorFormOpen = false;
+    if(pickState && (pickState.target === 'moveVector' || 
+       (pickState.target === 'rotateCenter' && !copyRotateFormOpen) || 
+       (pickState.target === 'mirrorLine' && !copyMirrorFormOpen))){
+      cancelPicking();
+    }
+  }
+
+  if(eSelCount === 0){
+    copyFormOpen = false;
+    copyRotateFormOpen = false;
+    copyMirrorFormOpen = false;
+    splitFormElId = null;
+    if(pickState && (pickState.target === 'copyVector' || 
+       (pickState.target === 'rotateCenter' && !nodeRotateFormOpen) || 
+       (pickState.target === 'mirrorLine' && !nodeMirrorFormOpen))){
+      cancelPicking();
+    }
+  } else if(splitFormElId != null && splitFormElId !== '__bulk__'){
+    if(!selection.elemIds.includes(splitFormElId) || !getElement(splitFormElId)){
+      splitFormElId = null;
+    }
+  }
 }
 function getMaterial(id){ return materials.find(m=>m.id===id); }
 function getSection(id){ return sections.find(s=>s.id===id); }
@@ -2510,32 +2545,13 @@ function setStatusHint(text){ document.getElementById('hint').textContent = text
 
 function normalizeAngle(a){ a = a%360; if(a>180) a-=360; if(a<=-180) a+=360; return Math.round(a*100)/100; }
 
-function copyToClipboard(text,label){
-  const done=(ok)=>setStatusHint((ok?'Skopiowano':'Nie udało się skopiować — wartość')+': '+text+(label?(' ('+label+')'):''));
-  if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(text).then(()=>done(true)).catch(()=>fallbackCopy(text,done));
-  } else {
-    fallbackCopy(text,done);
-  }
-}
-function fallbackCopy(text,done){
-  try{
-    const ta=document.createElement('textarea');
-    ta.value=text; ta.style.position='fixed'; ta.style.opacity='0'; ta.style.top='0'; ta.style.left='0';
-    document.body.appendChild(ta); ta.focus(); ta.select();
-    const ok=document.execCommand('copy');
-    document.body.removeChild(ta);
-    done(ok);
-  }catch(e){ done(false); }
-}
-
 /* compact "two inputs side by side" row used for value pairs (X/Y, qStart/qEnd, dTtop/dTbottom, F/kąt...).
    val1/val2 may be `undefined` (meaning: differs across a multi-selection) — shown as a blank field
    with a "różne" (mixed) placeholder instead of a value, same convention as numInputAttrs(). */
 function pairRow(l1,val1,step1,unit1,onchange1,l2,val2,step2,unit2,onchange2){
   return `<div class="row-pair">
-    <div class="half"><label>${l1}</label><div class="inp-unit"><input type="number" step="${step1}" ${numInputAttrs(val1)} onchange="${onchange1}"><span class="unit">${unit1}</span></div></div>
-    <div class="half"><label>${l2}</label><div class="inp-unit"><input type="number" step="${step2}" ${numInputAttrs(val2)} onchange="${onchange2}"><span class="unit">${unit2}</span></div></div>
+    <div class="half"><label>${l1}</label><div class="inp-unit"><input type="number" step="${step1}" ${numInputAttrs(val1)} oninput="${onchange1}" onchange="${onchange1}"><span class="unit">${unit1}</span></div></div>
+    <div class="half"><label>${l2}</label><div class="inp-unit"><input type="number" step="${step2}" ${numInputAttrs(val2)} oninput="${onchange2}" onchange="${onchange2}"><span class="unit">${unit2}</span></div></div>
   </div>`;
 }
 /* angle nudge (+45/-45) buttons; fnName is expected to read the current selection itself
@@ -4956,8 +4972,386 @@ function drawModelDimensionLines(){
 
   ctx.restore();
 }
+
+function drawOverlayBadge(x, y, text, bg, fg){
+  ctx.save();
+  ctx.font = '11px ' + FONT_MONO;
+  const w = ctx.measureText(text).width;
+  const padH = 6, h = 18;
+  const bx = x - w/2 - padH, by = y - h/2;
+  ctx.fillStyle = bg || getCss('--accent');
+  roundRect(bx, by, w + 2*padH, h, 4);
+  ctx.fill();
+  ctx.fillStyle = fg || '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+function drawFormHelperOverlays(){
+  // 1. Przenoszenie (Move)
+  if(moveFormOpen){
+    const dx = moveDx, dy = moveDy;
+    const targetNodes = selectedNodes();
+    if(targetNodes.length > 0){
+      ctx.save();
+      targetNodes.forEach(n => {
+        const p1 = toScreen(n.x, n.y);
+        const p2 = toScreen(n.x + dx, n.y + dy);
+
+        ctx.strokeStyle = getCss('--accent');
+        ctx.lineWidth = 1.8;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+
+        if(Math.hypot(p2.x - p1.x, p2.y - p1.y) >= 8){
+          const ang = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+          const ah = 8;
+          ctx.fillStyle = getCss('--accent');
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(p2.x, p2.y);
+          ctx.lineTo(p2.x - ah * Math.cos(ang - Math.PI/6), p2.y - ah * Math.sin(ang - Math.PI/6));
+          ctx.lineTo(p2.x - ah * Math.cos(ang + Math.PI/6), p2.y - ah * Math.sin(ang + Math.PI/6));
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        ctx.strokeStyle = getCss('--accent');
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([2, 2]);
+        ctx.fillStyle = 'rgba(79, 110, 247, 0.15)';
+        ctx.beginPath();
+        ctx.arc(p2.x, p2.y, 6, 0, 2*Math.PI);
+        ctx.fill();
+        ctx.stroke();
+      });
+
+      ctx.restore();
+    }
+  }
+
+  // 2. Kopiowanie (Copy)
+  if(copyFormOpen){
+    const selEls = selectedElements();
+    if(selEls.length > 0){
+      const dx = copyDx, dy = copyDy;
+      const nSet = new Set();
+      selEls.forEach(e => { nSet.add(e.n1); nSet.add(e.n2); });
+      const srcNodes = Array.from(nSet).map(getNode).filter(Boolean);
+
+      if(srcNodes.length > 0){
+        ctx.save();
+
+        ctx.strokeStyle = getCss('--react-color');
+        ctx.lineWidth = 2.2;
+        ctx.setLineDash([5, 4]);
+        selEls.forEach(e => {
+          const a = getNode(e.n1), b = getNode(e.n2);
+          if(!a || !b) return;
+          const p1 = toScreen(a.x + dx, a.y + dy);
+          const p2 = toScreen(b.x + dx, b.y + dy);
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        });
+
+        srcNodes.forEach(n => {
+          const p1 = toScreen(n.x, n.y);
+          const p2 = toScreen(n.x + dx, n.y + dy);
+
+          ctx.strokeStyle = getCss('--accent');
+          ctx.lineWidth = 1.6;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+
+          if(Math.hypot(p2.x - p1.x, p2.y - p1.y) >= 8){
+            const ang = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+            const ah = 8;
+            ctx.fillStyle = getCss('--accent');
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(p2.x, p2.y);
+            ctx.lineTo(p2.x - ah * Math.cos(ang - Math.PI/6), p2.y - ah * Math.sin(ang - Math.PI/6));
+            ctx.lineTo(p2.x - ah * Math.cos(ang + Math.PI/6), p2.y - ah * Math.sin(ang + Math.PI/6));
+            ctx.closePath();
+            ctx.fill();
+          }
+
+          ctx.strokeStyle = getCss('--accent');
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([2, 2]);
+          ctx.fillStyle = 'rgba(79, 110, 247, 0.15)';
+          ctx.beginPath();
+          ctx.arc(p2.x, p2.y, 6, 0, 2*Math.PI);
+          ctx.fill();
+          ctx.stroke();
+        });
+
+        ctx.restore();
+      }
+    }
+  }
+
+  // 3. Obrót (Rotate)
+  const activeNodeRotate = nodeRotateFormOpen && selectedNodes().length > 0;
+  const activeCopyRotate = copyRotateFormOpen && selectedElements().length > 0;
+  if(activeNodeRotate || activeCopyRotate){
+    const cx = rotCx, cy = rotCy, angDeg = rotAngle;
+    const spC = toScreen(cx, cy);
+
+    ctx.save();
+
+    // Środek obrotu
+    ctx.strokeStyle = getCss('--accent');
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.arc(spC.x, spC.y, 11, 0, 2*Math.PI);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(spC.x - 14, spC.y); ctx.lineTo(spC.x + 14, spC.y);
+    ctx.moveTo(spC.x, spC.y - 14); ctx.lineTo(spC.x, spC.y + 14);
+    ctx.stroke();
+
+    ctx.fillStyle = getCss('--accent');
+    ctx.beginPath();
+    ctx.arc(spC.x, spC.y, 3.5, 0, 2*Math.PI);
+    ctx.fill();
+
+    const selEls = activeCopyRotate ? selectedElements() : [];
+    let srcNodes = [];
+    if(activeCopyRotate && selEls.length > 0){
+      const nSet = new Set();
+      selEls.forEach(e => { nSet.add(e.n1); nSet.add(e.n2); });
+      srcNodes = Array.from(nSet).map(getNode).filter(Boolean);
+    } else {
+      srcNodes = selectedNodes();
+    }
+
+    if(srcNodes.length > 0){
+      if(selEls.length > 0){
+        ctx.strokeStyle = getCss('--react-color');
+        ctx.lineWidth = 2.2;
+        ctx.setLineDash([5, 4]);
+        selEls.forEach(e => {
+          const a = getNode(e.n1), b = getNode(e.n2);
+          if(!a || !b) return;
+          const ra = rotatePoint(a.x, a.y, cx, cy, angDeg);
+          const rb = rotatePoint(b.x, b.y, cx, cy, angDeg);
+          const p1 = toScreen(ra.x, ra.y);
+          const p2 = toScreen(rb.x, rb.y);
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+        });
+      }
+
+      srcNodes.forEach(n => {
+        const rn = rotatePoint(n.x, n.y, cx, cy, angDeg);
+        const p1 = toScreen(n.x, n.y);
+        const p2 = toScreen(rn.x, rn.y);
+
+        ctx.strokeStyle = 'rgba(79, 110, 247, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 2]);
+        ctx.beginPath();
+        ctx.moveTo(spC.x, spC.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.moveTo(spC.x, spC.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+
+        const R = Math.hypot(p1.x - spC.x, p1.y - spC.y);
+        if(R > 10){
+          const startAng = Math.atan2(p1.y - spC.y, p1.x - spC.x);
+          const endAng = Math.atan2(p2.y - spC.y, p2.x - spC.x);
+          const counterClockwise = (angDeg > 0);
+
+          ctx.strokeStyle = getCss('--accent');
+          ctx.lineWidth = 1.6;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.arc(spC.x, spC.y, R, startAng, endAng, counterClockwise);
+          ctx.stroke();
+        }
+
+        ctx.strokeStyle = getCss('--accent');
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([2, 2]);
+        ctx.fillStyle = 'rgba(79, 110, 247, 0.15)';
+        ctx.beginPath();
+        ctx.arc(p2.x, p2.y, 6, 0, 2*Math.PI);
+        ctx.fill();
+        ctx.stroke();
+      });
+    }
+
+    ctx.restore();
+  }
+
+  // 4. Odbicie lustrzane (Mirror)
+  const activeNodeMirror = nodeMirrorFormOpen && selectedNodes().length > 0;
+  const activeCopyMirror = copyMirrorFormOpen && selectedElements().length > 0;
+  if(activeNodeMirror || activeCopyMirror){
+    const x1 = mirX1, y1 = mirY1, x2 = mirX2, y2 = mirY2;
+    const p1 = toScreen(x1, y1);
+    const p2 = toScreen(x2, y2);
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy);
+
+    ctx.save();
+
+    if(len < 1e-4){
+      ctx.fillStyle = getCss('--accent');
+      ctx.beginPath(); ctx.arc(p1.x, p1.y, 6, 0, 2*Math.PI); ctx.fill();
+    } else {
+      const ux = dx / len, uy = dy / len;
+
+      ctx.strokeStyle = getCss('--accent');
+      ctx.lineWidth = 2;
+      ctx.setLineDash([7, 4]);
+      ctx.beginPath();
+      ctx.moveTo(p1.x - ux * 3000, p1.y - uy * 3000);
+      ctx.lineTo(p2.x + ux * 3000, p2.y + uy * 3000);
+      ctx.stroke();
+
+      [ p1, p2 ].forEach(pt => {
+        ctx.fillStyle = getCss('--accent');
+        ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, 2*Math.PI); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.2; ctx.stroke();
+      });
+
+      const selEls = activeCopyMirror ? selectedElements() : [];
+      let srcNodes = [];
+      if(activeCopyMirror && selEls.length > 0){
+        const nSet = new Set();
+        selEls.forEach(e => { nSet.add(e.n1); nSet.add(e.n2); });
+        srcNodes = Array.from(nSet).map(getNode).filter(Boolean);
+      } else {
+        srcNodes = selectedNodes();
+      }
+
+      if(srcNodes.length > 0){
+        if(selEls.length > 0){
+          ctx.strokeStyle = getCss('--react-color');
+          ctx.lineWidth = 2.2;
+          ctx.setLineDash([5, 4]);
+          selEls.forEach(e => {
+            const a = getNode(e.n1), b = getNode(e.n2);
+            if(!a || !b) return;
+            const ma = mirrorPoint(a.x, a.y, x1, y1, x2, y2);
+            const mb = mirrorPoint(b.x, b.y, x1, y1, x2, y2);
+            const mp1 = toScreen(ma.x, ma.y);
+            const mp2 = toScreen(mb.x, mb.y);
+            ctx.beginPath();
+            ctx.moveTo(mp1.x, mp1.y);
+            ctx.lineTo(mp2.x, mp2.y);
+            ctx.stroke();
+          });
+        }
+
+        srcNodes.forEach(n => {
+          const mn = mirrorPoint(n.x, n.y, x1, y1, x2, y2);
+          const np = toScreen(n.x, n.y);
+          const mnp = toScreen(mn.x, mn.y);
+
+          ctx.strokeStyle = 'rgba(79, 110, 247, 0.35)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 3]);
+          ctx.beginPath();
+          ctx.moveTo(np.x, np.y);
+          ctx.lineTo(mnp.x, mnp.y);
+          ctx.stroke();
+
+          ctx.strokeStyle = getCss('--accent');
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([2, 2]);
+          ctx.fillStyle = 'rgba(79, 110, 247, 0.15)';
+          ctx.beginPath();
+          ctx.arc(mnp.x, mnp.y, 6, 0, 2*Math.PI);
+          ctx.fill();
+          ctx.stroke();
+        });
+      }
+    }
+
+    ctx.restore();
+  }
+
+  // 5. Dzielenie prętów (Split)
+  if(splitFormElId != null){
+    const targetEls = (splitFormElId === '__bulk__') 
+      ? selectedElements() 
+      : (isElementSelected(splitFormElId) ? [getElement(splitFormElId)].filter(Boolean) : []);
+
+    if(targetEls.length > 0){
+      ctx.save();
+
+      targetEls.forEach(el => {
+        const a = getNode(el.n1), b = getNode(el.n2);
+        if(!a || !b) return;
+
+        const pa = toScreen(a.x, a.y);
+        const pb = toScreen(b.x, b.y);
+        const dx = pb.x - pa.x, dy = pb.y - pa.y;
+        const segLen = Math.hypot(dx, dy);
+        if(segLen < 1) return;
+
+        const u = { x: dx / segLen, y: dy / segLen };
+        const v = { x: -u.y, y: u.x };
+
+        let tList = [];
+        if(splitMode === 'single'){
+          tList = [splitT];
+        } else {
+          const N = splitN;
+          for(let i = 1; i < N; i++){
+            tList.push(i / N);
+          }
+        }
+
+        tList.forEach(tVal => {
+          const sp = { x: pa.x + dx * tVal, y: pa.y + dy * tVal };
+
+          const tickR = 8;
+          ctx.strokeStyle = getCss('--accent');
+          ctx.lineWidth = 2.4;
+          ctx.setLineDash([]);
+          ctx.beginPath();
+          ctx.moveTo(sp.x - v.x * tickR, sp.y - v.y * tickR);
+          ctx.lineTo(sp.x + v.x * tickR, sp.y + v.y * tickR);
+          ctx.stroke();
+
+          ctx.fillStyle = getCss('--accent');
+          ctx.beginPath();
+          ctx.arc(sp.x, sp.y, 4, 0, 2*Math.PI);
+          ctx.fill();
+          ctx.strokeStyle = '#fff';
+          ctx.lineWidth = 1.2;
+          ctx.stroke();
+        });
+      });
+
+      ctx.restore();
+    }
+  }
+}
+
 function drawTransientOverlays(){
   if(pickState){
+    if(isTouchInput) return; // Nie pokazuj celownika, prowadnic ani linii wymiarowych kursora na ekranie dotykowym
     const pt = getSnapPickPoint(lastMousePx, lastMousePy);
     const sp = toScreen(pt.x, pt.y);
 
@@ -5007,6 +5401,20 @@ function drawTransientOverlays(){
         drawSegmentDimensionPoints(sp1, sp, dist);
       }
 
+      if(pickState.target === 'forceAngle' || pickState.target === 'qAngle' || pickState.target === 'supportAngle' || pickState.target === 'moveVector' || pickState.target === 'copyVector'){
+        if(pixelDist >= 12){
+          const ang = Math.atan2(sp.y - sp1.y, sp.x - sp1.x);
+          const ah = 8;
+          ctx.fillStyle = getCss('--accent');
+          ctx.beginPath();
+          ctx.moveTo(sp.x, sp.y);
+          ctx.lineTo(sp.x - ah * Math.cos(ang - Math.PI/6), sp.y - ah * Math.sin(ang - Math.PI/6));
+          ctx.lineTo(sp.x - ah * Math.cos(ang + Math.PI/6), sp.y - ah * Math.sin(ang + Math.PI/6));
+          ctx.closePath();
+          ctx.fill();
+        }
+      }
+
       if(pickState.target === 'mirrorLine'){
         const dx = sp.x - sp1.x, dy = sp.y - sp1.y;
         const len = Math.hypot(dx, dy);
@@ -5021,23 +5429,17 @@ function drawTransientOverlays(){
           ctx.stroke();
         }
       }
-    } else if(pickState.target === 'rotateCenter'){
-      ctx.strokeStyle = getCss('--accent');
-      ctx.lineWidth = 1.4;
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.arc(sp.x, sp.y, 12, 0, 2*Math.PI);
-      ctx.stroke();
     }
     ctx.restore();
     return;
   }
+  drawFormHelperOverlays();
   if(dragNode!=null){
     drawElementDimensions(connectedElements(dragNode));
     drawNodeCoordTip(dragNode);
     return;
   }
-  if(mode==='addBar' && barStart!=null){
+  if(mode==='addBar' && barStart!=null && !isTouchInput){
     const a=getNode(barStart);
     if(a){
       const pa=toScreen(a.x,a.y);
@@ -5208,8 +5610,6 @@ const ICONS = {
   copyMirror:'<svg viewBox="0 0 24 24"><path d="M10.5 3v18" stroke-dasharray="2.5 2.2"/><path d="M7 7L3.5 10.5 7 14M14 7l3.5 3.5L14 14"/><rect x="16" y="2" width="6" height="6" rx="1.3"/></svg>',
   splitBar:'<svg viewBox="0 0 24 24"><circle cx="4" cy="20" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="20" cy="4" r="2"/><path d="M5.41 18.59L10.59 13.41M13.41 10.59L18.59 5.41"/></svg>',
   intersect:'<svg viewBox="0 0 24 24"><path d="M4 4l16 16M20 4L4 20"/><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/></svg>',
-  copyLen:'<svg viewBox="0 0 24 24"><g opacity="0.35" stroke-dasharray="0.8 1.2"><path d="M9 3h6a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1Z" stroke-dasharray="none"/><rect x="4" y="5" width="16" height="17" rx="2"/></g><rect x="3" y="10" width="18" height="5" rx="1"/><path d="M7 10v2M11 10v2M15 10v2M19 10v2"/></svg>',
-  copyAngle:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g opacity="0.35" stroke-dasharray="0.8 1.2"><path d="M9 3h6a1 1 0 0 1 1 1v2H8V4a1 1 0 0 1 1-1Z" stroke-dasharray="none"/><rect x="4" y="5" width="16" height="17" rx="2"/></g><path d="M7 18h10M7 18L16 7M12 18a5 5 0 0 0-1.46-3.54"/></svg>',
   supNone:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M7 7l10 10"/></svg>',
   supFixed:'<svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="1.6" fill="currentColor" stroke="none"/><path d="M4 12h16"/><path d="M6 12l-3 5M10 12l-3 5M14 12l-3 5M18 12l-3 5"/></svg>',
   supPin:'<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none"/><path d="M12 6l-6 8h12z"/><path d="M6 14h12"/><path d="M7 14l-2.5 4M11 14l-2.5 4M15 14l-2.5 4M19 14l-2.5 4"/></svg>',
@@ -6021,7 +6421,22 @@ function deleteLocalModelById(id){
 /* =========================================================================
    EVENTS
    ========================================================================= */
+let isTouchInput = ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+let lastTouchTime = 0;
+
+function markTouchInput(){
+  isTouchInput = true;
+  lastTouchTime = Date.now();
+  const coordsEl = document.getElementById('coords');
+  if(coordsEl) coordsEl.textContent = '';
+}
+function markMouseInput(){
+  if(Date.now() - lastTouchTime < 1000) return;
+  isTouchInput = false;
+}
+
 function onDown(e){
+  markMouseInput();
   if(e.button!==0) return;
   const rect=canvas.getBoundingClientRect();
   handlePointerDown(e.clientX-rect.left, e.clientY-rect.top);
@@ -6132,6 +6547,7 @@ function performTapAction(tapMode,px,py){
   }
 }
 function onMove(e){
+  markMouseInput();
   const rect=canvas.getBoundingClientRect();
   handlePointerMove(e.clientX-rect.left, e.clientY-rect.top);
 }
@@ -6141,9 +6557,23 @@ function handlePointerMove(px,py){
   mouseModel=toModel(px,py);
   const coordsEl=document.getElementById('coords');
   if(coordsEl){
-    if(pickState){
+    if(isTouchInput){
+      coordsEl.textContent = '';
+    } else if(pickState){
       const pt = getSnapPickPoint(px, py);
-      coordsEl.textContent = `x=${pt.x.toFixed(2)}\u00A0m,  y=${pt.y.toFixed(2)}\u00A0m (Wskaż)`;
+      if(pickState.step === 2 && pickState.p1){
+        const dx = pt.x - pickState.p1.x, dy = pt.y - pickState.p1.y;
+        if(pickState.target === 'forceAngle' || pickState.target === 'qAngle' || pickState.target === 'supportAngle'){
+          const curAng = normalizeAngle(Math.atan2(dy, dx) * 180 / Math.PI);
+          coordsEl.textContent = `x=${pt.x.toFixed(2)}\u00A0m,  y=${pt.y.toFixed(2)}\u00A0m (kąt: ${fmtSmart(curAng)}°)`;
+        } else if(pickState.target === 'moveVector' || pickState.target === 'copyVector'){
+          coordsEl.textContent = `x=${pt.x.toFixed(2)}\u00A0m,  y=${pt.y.toFixed(2)}\u00A0m (Δx=${fmtSmart(dx)}, Δy=${fmtSmart(dy)})`;
+        } else {
+          coordsEl.textContent = `x=${pt.x.toFixed(2)}\u00A0m,  y=${pt.y.toFixed(2)}\u00A0m (Wskaż 2/2)`;
+        }
+      } else {
+        coordsEl.textContent = `x=${pt.x.toFixed(2)}\u00A0m,  y=${pt.y.toFixed(2)}\u00A0m (Wskaż)`;
+      }
     } else {
       coordsEl.textContent = `x=${mouseModel.x.toFixed(2)}\u00A0m,  y=${mouseModel.y.toFixed(2)}\u00A0m`;
     }
@@ -6189,7 +6619,10 @@ function handlePointerMove(px,py){
     render();
     return;
   }
-  if(pickState){
+  if(isTouchInput){
+    hoverNodeId = null;
+    hoverElemId = null;
+  } else if(pickState){
     const pt = getSnapPickPoint(px, py);
     hoverNodeId = pt.nodeId;
     hoverElemId = null;
@@ -6198,17 +6631,25 @@ function handlePointerMove(px,py){
     return;
   }
   if(mode==='select'){
-    const nid=hitTestNode(px,py);
-    const eid = nid==null? hitTestElement(px,py): null;
-    if(nid!==hoverNodeId || eid!==hoverElemId){ hoverNodeId=nid; hoverElemId=eid; render(); }
-    canvas.style.cursor = (nid!=null||eid!=null)? 'pointer':(panState?'grabbing':'default');
+    if(isTouchInput){
+      hoverNodeId = null; hoverElemId = null;
+    } else {
+      const nid=hitTestNode(px,py);
+      const eid = nid==null? hitTestElement(px,py): null;
+      if(nid!==hoverNodeId || eid!==hoverElemId){ hoverNodeId=nid; hoverElemId=eid; render(); }
+      canvas.style.cursor = (nid!=null||eid!=null)? 'pointer':(panState?'grabbing':'default');
+    }
   } else {
     canvas.style.cursor='crosshair';
     if(mode==='addBar'){
-      const nid=hitTestNode(px,py);
-      const eid=nid==null ? hitTestElement(px,py) : null;
-      if(nid!==hoverNodeId || eid!==hoverElemId || barStart!=null){
-        hoverNodeId=nid; hoverElemId=eid; render();
+      if(isTouchInput){
+        hoverNodeId = null; hoverElemId = null;
+      } else {
+        const nid=hitTestNode(px,py);
+        const eid=nid==null ? hitTestElement(px,py) : null;
+        if(nid!==hoverNodeId || eid!==hoverElemId || barStart!=null){
+          hoverNodeId=nid; hoverElemId=eid; render();
+        }
       }
     }
   }
@@ -6258,6 +6699,7 @@ function handlePointerUp(){
   panState=null;
 }
 function onWheel(e){
+  markMouseInput();
   e.preventDefault();
   userAdjustedView=true;
   const rect=canvas.getBoundingClientRect();
@@ -6333,6 +6775,7 @@ function touchMid(e){
   return {x:(a.x+b.x)/2,y:(a.y+b.y)/2};
 }
 function onTouchStart(e){
+  markTouchInput();
   e.preventDefault();
   if(e.touches.length===1){
     touchPinch=null;
@@ -6346,6 +6789,7 @@ function onTouchStart(e){
   }
 }
 function onTouchMove(e){
+  markTouchInput();
   e.preventDefault();
   if(e.touches.length===1 && !touchPinch){
     const p=touchPt(e.touches[0]);
@@ -6362,6 +6806,7 @@ function onTouchMove(e){
   }
 }
 function onTouchEnd(e){
+  markTouchInput();
   e.preventDefault();
   if(e.touches.length===0){ handlePointerUp(); touchPinch=null; }
   else if(e.touches.length===1){ touchPinch=null; dragNode=null; dragNodeState=null; panState=null; boxSelectState=null; }
@@ -7149,7 +7594,12 @@ function panelNode(nodesArr){
       <button class="mini mini-icon ${nodesArr.every(n=>presetMatches(n,'sleeve'))?'on':''}" onclick="bulkApplySupportPreset('sleeve')" title="Tuleja obrotowa (blokuje tylko obrót)">${ICONS.supSleeve}</button>
     </div>
     <hr class="sep">
-    <div class="row"><label>Kąt podpory</label><input type="number" step="5" ${numInputAttrs(commonVal(nodesArr,n=>n.support?(n.support.angleDeg||0):0))} onchange="bulkUpdateSupportAngle(this.value)"><span class="unit">°</span></div>
+    <div class="row">
+      <label>Kąt podpory</label>
+      <input type="number" step="5" ${numInputAttrs(commonVal(nodesArr,n=>n.support?(n.support.angleDeg||0):0))} onchange="bulkUpdateSupportAngle(this.value)">
+      <span class="unit">°</span>
+      <button class="mini ${isPickingTarget('supportAngle')?'on':''}" onclick="togglePick('supportAngle')" title="Wskaż kąt podpory na modelu (kliknij 2 punkty: początek i koniec wektora)">${isPickingTarget('supportAngle') ? (pickState.step===1 ? 'Wskaż 1/2...' : 'Wskaż 2/2...') : 'Wskaż'}</button>
+    </div>
     <div class="btnrow" style="margin-top:-2px;">${angleNudgeButtons('bulkNudgeSupportAngle')}</div>
     <div class="muted" style="margin:6px 0;">Obraca lokalne kierunki H/V podpory względem osi globalnych (np. podpora na skarpie).</div>
     ${dirBlock(nodesArr,'ux','Poziomy (H)',false)}
@@ -7167,7 +7617,17 @@ function panelNode(nodesArr){
         ${pairRow('Skł. pozioma',fxVal,'0.5','kN',`bulkUpdateNodeForce('Fx',this.value)`,'Skł. pionowa',fyVal,'0.5','kN',`bulkUpdateNodeForce('Fy',this.value)`)}
         <div class="muted">Pozioma: dodatnia = w prawo. Pionowa: dodatnia = w górę.</div>
       ` : forceModeCommon==='polar'? `
-        ${pairRow('Wartość',fVal,'0.5','kN',`bulkUpdateNodeForce('F',this.value)`,'Kąt',aVal,'5','°',`bulkUpdateNodeForce('angle',this.value)`)}
+        <div class="row">
+          <label>Wartość</label>
+          <input type="number" step="0.5" ${numInputAttrs(fVal)} onchange="bulkUpdateNodeForce('F',this.value)">
+          <span class="unit">kN</span>
+        </div>
+        <div class="row">
+          <label>Kąt</label>
+          <input type="number" step="5" ${numInputAttrs(aVal)} onchange="bulkUpdateNodeForce('angle',this.value)">
+          <span class="unit">°</span>
+          <button class="mini ${isPickingTarget('forceAngle')?'on':''}" onclick="togglePick('forceAngle')" title="Wskaż kąt siły na modelu (kliknij 2 punkty: początek i koniec wektora)">${isPickingTarget('forceAngle') ? (pickState.step===1 ? 'Wskaż 1/2...' : 'Wskaż 2/2...') : 'Wskaż'}</button>
+        </div>
         <div class="btnrow">
           <button class="mini" onclick="bulkSetForceAngle(270)">↓ w dół</button>
           <button class="mini" onclick="bulkSetForceAngle(90)">↑ w górę</button>
@@ -7228,8 +7688,6 @@ function panelElement(elArr){
       <div class="muted" style="margin-bottom:8px;">Długość L=${fmt(L,3)} m &nbsp;·&nbsp; kąt nachylenia=${fmt(angDeg,2)}°</div>
       <div class="btnrow">
         <button class="mini mini-icon danger" onclick="deleteSelectedElements()" title="Usuń pręt">${ICONS.del}</button>
-        <button class="mini mini-icon" onclick="copyToClipboard('${fmt(L,3)}','długość P${el.id}')" title="Kopiuj długość do schowka">${ICONS.copyLen}</button>
-        <button class="mini mini-icon" onclick="copyToClipboard('${fmt(angDeg,2)}','kąt P${el.id}')" title="Kopiuj kąt do schowka">${ICONS.copyAngle}</button>
         <button class="mini mini-icon ${splitFormElId===el.id?'on':''}" onclick="openSplitForm(${el.id})" title="Podziel pręt">${ICONS.splitBar}</button>
         <button class="mini mini-icon ${copyFormOpen?'on':''}" onclick="openCopyForm()" title="Kopiuj pręt">${ICONS.copyVec}</button>
         <button class="mini mini-icon ${copyRotateFormOpen?'on':''}" onclick="openCopyRotateForm()" title="Kopiuj pręt z obrotem">${ICONS.copyRotate}</button>
@@ -7289,7 +7747,12 @@ function panelElement(elArr){
       </div>
       ${pairRow('Wartość pocz.',qStartVal,'1','kN/m',`bulkUpdateElemQ('qStart',this.value)`,'Wartość końc.',qEndVal,'1','kN/m',`bulkUpdateElemQ('qEnd',this.value)`)}
       ${qModeCommon==='resultant'? `
-        <div class="row"><label>Kąt</label><input type="number" step="5" ${numInputAttrs(qAngleVal)} onchange="bulkUpdateElemQ('angle',this.value)"><span class="unit">°</span></div>
+        <div class="row">
+          <label>Kąt</label>
+          <input type="number" step="5" ${numInputAttrs(qAngleVal)} onchange="bulkUpdateElemQ('angle',this.value)">
+          <span class="unit">°</span>
+          <button class="mini ${isPickingTarget('qAngle')?'on':''}" onclick="togglePick('qAngle')" title="Wskaż kąt obciążenia ciągłego na modelu (kliknij 2 punkty: początek i koniec wektora)">${isPickingTarget('qAngle') ? (pickState.step===1 ? 'Wskaż 1/2...' : 'Wskaż 2/2...') : 'Wskaż'}</button>
+        </div>
         <div class="btnrow">
           <button class="mini" onclick="bulkSetQAngle(270)">Pionowe ↓</button>
           <button class="mini" onclick="bulkSetQAngle(90)">Pionowe ↑</button>
@@ -7323,12 +7786,12 @@ function openSplitForm(elId){
     splitT = 0.5;
     splitN = 2;
   }
-  renderSidebar();
+  renderSidebar(); render();
 }
-function closeSplitForm(){ splitFormElId=null; renderSidebar(); }
-function setSplitMode(m){ splitMode=m; renderSidebar(); }
-function setSplitT(v){ splitT=Math.max(0.02,Math.min(0.98,parseFloat(v)||0.5)); }
-function setSplitN(v){ splitN=Math.max(2,Math.min(30,Math.round(parseFloat(v)||2))); }
+function closeSplitForm(){ splitFormElId=null; renderSidebar(); render(); }
+function setSplitMode(m){ splitMode=m; renderSidebar(); render(); }
+function setSplitT(v){ splitT=Math.max(0.02,Math.min(0.98,parseFloat(v)||0.5)); render(); }
+function setSplitN(v){ splitN=Math.max(2,Math.min(30,Math.round(parseFloat(v)||2))); render(); }
 function splitFormHtml(el){
   const L=elLength(el);
   return `<div class="card" style="margin-top:8px;background:var(--surface);border-color:var(--input-border);">
@@ -7337,10 +7800,10 @@ function splitFormHtml(el){
       <button class="mini ${splitMode==='multi'?'on':''}" onclick="setSplitMode('multi')">Podział na N części</button>
     </div>
     ${splitMode==='single'? `
-      <div class="row"><label>Punkt t (0–1)</label><input type="number" min="0.02" max="0.98" step="0.05" value="${splitT}" onchange="setSplitT(this.value)"></div>
+      <div class="row"><label>Punkt t (0–1)</label><input type="number" min="0.02" max="0.98" step="0.05" value="${splitT}" oninput="setSplitT(this.value)" onchange="setSplitT(this.value)"></div>
       <div class="muted">t liczone od W${el.n1} do W${el.n2}. Odległość od W${el.n1}: ${fmt(splitT*L,3)} m.</div>
     ` : `
-      <div class="row"><label>Liczba części</label><input type="number" min="2" max="30" step="1" value="${splitN}" onchange="setSplitN(this.value)"></div>
+      <div class="row"><label>Liczba części</label><input type="number" min="2" max="30" step="1" value="${splitN}" oninput="setSplitN(this.value)" onchange="setSplitN(this.value)"></div>
       <div class="muted">Każdy odcinek: ${fmt(L/splitN,3)} m.</div>
     `}
     <div class="btnrow" style="margin-top:8px;">
@@ -7357,10 +7820,10 @@ function splitFormHtmlBulk(elArr){
       <button class="mini ${splitMode==='multi'?'on':''}" onclick="setSplitMode('multi')">Podział na N części</button>
     </div>
     ${splitMode==='single'? `
-      <div class="row"><label>Punkt t (0–1)</label><input type="number" min="0.02" max="0.98" step="0.05" value="${splitT}" onchange="setSplitT(this.value)"></div>
+      <div class="row"><label>Punkt t (0–1)</label><input type="number" min="0.02" max="0.98" step="0.05" value="${splitT}" oninput="setSplitT(this.value)" onchange="setSplitT(this.value)"></div>
       <div class="muted">t liczone od pierwszego do drugiego węzła każdego z ${elArr.length} zaznaczonych prętów (np. dla P${elArr[0].id}: ${fmt(splitT*L0,3)} m od W${elArr[0].n1}).</div>
     ` : `
-      <div class="row"><label>Liczba części</label><input type="number" min="2" max="30" step="1" value="${splitN}" onchange="setSplitN(this.value)"></div>
+      <div class="row"><label>Liczba części</label><input type="number" min="2" max="30" step="1" value="${splitN}" oninput="setSplitN(this.value)" onchange="setSplitN(this.value)"></div>
       <div class="muted">Każdy z ${elArr.length} zaznaczonych prętów zostanie podzielony na ${splitN} równych części.</div>
     `}
     <div class="btnrow" style="margin-top:8px;">
@@ -7454,6 +7917,12 @@ function startPick(target){
     setStatusHint('Tryb wskazywania: Wskaż Punkt 1 linii lustra na modelu [lub Esc aby anulować].');
   } else if(target === 'mirrorP2'){
     setStatusHint('Tryb wskazywania: Wskaż Punkt 2 linii lustra na modelu [lub Esc aby anulować].');
+  } else if(target === 'forceAngle'){
+    setStatusHint('Tryb wskazywania: Wskaż Punkt 1 (1/2) wektora kąta siły na modelu [lub Esc aby anulować].');
+  } else if(target === 'qAngle'){
+    setStatusHint('Tryb wskazywania: Wskaż Punkt 1 (1/2) wektora kąta obciążenia ciągłego na modelu [lub Esc aby anulować].');
+  } else if(target === 'supportAngle'){
+    setStatusHint('Tryb wskazywania: Wskaż Punkt 1 (1/2) wektora kąta podpory na modelu [lub Esc aby anulować].');
   }
   renderSidebar();
   render();
@@ -7569,6 +8038,69 @@ function handlePickPoint(pt){
     setStatusHint(`Wskazano Punkt 2 linii lustra: (${fmtSmart(mirX2)}, ${fmtSmart(mirY2)}) m.`);
     renderSidebar();
     render();
+  } else if(target === 'forceAngle'){
+    if(pickState.step === 1){
+      pickState.p1 = pt;
+      pickState.step = 2;
+      setStatusHint(`Wskazano Punkt 1 (${fmtSmart(pt.x)}, ${fmtSmart(pt.y)}) m. Wskaż Punkt 2 (2/2) wektora kąta siły.`);
+      renderSidebar();
+      render();
+    } else {
+      const p1 = pickState.p1;
+      const dx = pt.x - p1.x, dy = pt.y - p1.y;
+      if(Math.hypot(dx, dy) < 1e-6){
+        setStatusHint('Wskazano ten sam punkt. Wskaż Punkt 2 w innym miejscu.');
+        return;
+      }
+      const ang = normalizeAngle(Math.atan2(dy, dx) * 180 / Math.PI);
+      bulkUpdateNodeForce('angle', ang);
+      pickState = null;
+      setStatusHint(`Wskazano kąt siły: ${fmtSmart(ang)}°.`);
+      renderSidebar();
+      render();
+    }
+  } else if(target === 'qAngle'){
+    if(pickState.step === 1){
+      pickState.p1 = pt;
+      pickState.step = 2;
+      setStatusHint(`Wskazano Punkt 1 (${fmtSmart(pt.x)}, ${fmtSmart(pt.y)}) m. Wskaż Punkt 2 (2/2) wektora kąta obciążenia.`);
+      renderSidebar();
+      render();
+    } else {
+      const p1 = pickState.p1;
+      const dx = pt.x - p1.x, dy = pt.y - p1.y;
+      if(Math.hypot(dx, dy) < 1e-6){
+        setStatusHint('Wskazano ten sam punkt. Wskaż Punkt 2 w innym miejscu.');
+        return;
+      }
+      const ang = normalizeAngle(Math.atan2(dy, dx) * 180 / Math.PI);
+      bulkUpdateElemQ('angle', ang);
+      pickState = null;
+      setStatusHint(`Wskazano kąt obciążenia: ${fmtSmart(ang)}°.`);
+      renderSidebar();
+      render();
+    }
+  } else if(target === 'supportAngle'){
+    if(pickState.step === 1){
+      pickState.p1 = pt;
+      pickState.step = 2;
+      setStatusHint(`Wskazano Punkt 1 (${fmtSmart(pt.x)}, ${fmtSmart(pt.y)}) m. Wskaż Punkt 2 (2/2) wektora kąta podpory.`);
+      renderSidebar();
+      render();
+    } else {
+      const p1 = pickState.p1;
+      const dx = pt.x - p1.x, dy = pt.y - p1.y;
+      if(Math.hypot(dx, dy) < 1e-6){
+        setStatusHint('Wskazano ten sam punkt. Wskaż Punkt 2 w innym miejscu.');
+        return;
+      }
+      const ang = normalizeAngle(Math.atan2(dy, dx) * 180 / Math.PI);
+      bulkUpdateSupportAngle(ang);
+      pickState = null;
+      setStatusHint(`Wskazano kąt podpory: ${fmtSmart(ang)}°.`);
+      renderSidebar();
+      render();
+    }
   }
 }
 
@@ -7578,6 +8110,7 @@ function closeAllInlineForms(){
   splitFormElId=null; moveFormOpen=false; copyFormOpen=false;
   nodeRotateFormOpen=false; nodeMirrorFormOpen=false;
   copyRotateFormOpen=false; copyMirrorFormOpen=false;
+  render();
 }
 
 /* ---- node move ---- */
@@ -7586,11 +8119,11 @@ function openMoveForm(){
   const wasOpen=moveFormOpen;
   closeAllInlineForms();
   moveFormOpen = !wasOpen;
-  renderSidebar();
+  renderSidebar(); render();
 }
-function closeMoveForm(){ moveFormOpen=false; renderSidebar(); }
-function setMoveDx(v){ moveDx=parseFloat(v)||0; }
-function setMoveDy(v){ moveDy=parseFloat(v)||0; }
+function closeMoveForm(){ moveFormOpen=false; renderSidebar(); render(); }
+function setMoveDx(v){ moveDx=parseFloat(v)||0; render(); }
+function setMoveDy(v){ moveDy=parseFloat(v)||0; render(); }
 function moveFormHtml(){
   const isPick = isPickingTarget('moveVector');
   let btnLabel = 'Wskaż wektor';
@@ -7640,11 +8173,11 @@ function openCopyForm(){
   const wasOpen=copyFormOpen;
   closeAllInlineForms();
   copyFormOpen = !wasOpen;
-  renderSidebar();
+  renderSidebar(); render();
 }
-function closeCopyForm(){ copyFormOpen=false; renderSidebar(); }
-function setCopyDx(v){ copyDx=parseFloat(v)||0; }
-function setCopyDy(v){ copyDy=parseFloat(v)||0; }
+function closeCopyForm(){ copyFormOpen=false; renderSidebar(); render(); }
+function setCopyDx(v){ copyDx=parseFloat(v)||0; render(); }
+function setCopyDy(v){ copyDy=parseFloat(v)||0; render(); }
 function copyFormHtml(){
   const isPick = isPickingTarget('copyVector');
   let btnLabel = 'Wskaż wektor';
@@ -7710,13 +8243,13 @@ function applyTransformMergePass(ids){
 let rotInitialized=false, mirInitialized=false;
 let rotCx=0, rotCy=0, rotAngle=90;
 let mirX1=0, mirY1=0, mirX2=1, mirY2=0;
-function setRotCx(v){ rotCx=parseFloat(v)||0; rotInitialized=true; }
-function setRotCy(v){ rotCy=parseFloat(v)||0; rotInitialized=true; }
-function setRotAngle(v){ rotAngle=parseFloat(v)||0; rotInitialized=true; }
-function setMirX1(v){ mirX1=parseFloat(v)||0; mirInitialized=true; }
-function setMirY1(v){ mirY1=parseFloat(v)||0; mirInitialized=true; }
-function setMirX2(v){ mirX2=parseFloat(v)||0; mirInitialized=true; }
-function setMirY2(v){ mirY2=parseFloat(v)||0; mirInitialized=true; }
+function setRotCx(v){ rotCx=parseFloat(v)||0; rotInitialized=true; render(); }
+function setRotCy(v){ rotCy=parseFloat(v)||0; rotInitialized=true; render(); }
+function setRotAngle(v){ rotAngle=parseFloat(v)||0; rotInitialized=true; render(); }
+function setMirX1(v){ mirX1=parseFloat(v)||0; mirInitialized=true; render(); }
+function setMirY1(v){ mirY1=parseFloat(v)||0; mirInitialized=true; render(); }
+function setMirX2(v){ mirX2=parseFloat(v)||0; mirInitialized=true; render(); }
+function setMirY2(v){ mirY2=parseFloat(v)||0; mirInitialized=true; render(); }
 function setTransformDefaults(ids, mode){
   const pts=ids.map(getNode).filter(Boolean);
   if(!pts.length) return;
@@ -7733,7 +8266,7 @@ function rotateFormFields(confirmFn,cancelFn){
       <button class="mini ${isPick?'on':''}" onclick="togglePick('rotateCenter')" title="Wskaż punkt środka obrotu na modelu (1 kliknięcie)">${isPick ? 'Wskaż punkt na modelu...' : 'Wskaż środek'}</button>
       ${isPick ? `<button class="mini" onclick="cancelPicking();renderSidebar();render();">Anuluj wskazywanie</button>` : ''}
     </div>
-    <div class="row"><label>Kąt obrotu</label><input type="number" step="5" value="${rotAngle}" onchange="setRotAngle(this.value)"><span class="unit">°</span></div>
+    <div class="row"><label>Kąt obrotu</label><input type="number" step="5" value="${rotAngle}" oninput="setRotAngle(this.value)" onchange="setRotAngle(this.value)"><span class="unit">°</span></div>
     <div class="muted">Kąt dodatni = przeciwnie do ruchu wskazówek zegara.</div>
     <div class="btnrow" style="margin-top:8px;">
       <button class="mini on" onclick="${confirmFn}">Obróć</button>
@@ -7854,15 +8387,15 @@ let copyRotateFormOpen=false;
 function openCopyRotateForm(){
   const wasOpen=copyRotateFormOpen;
   closeAllInlineForms();
-  if(wasOpen){ renderSidebar(); return; }
+  if(wasOpen){ renderSidebar(); render(); return; }
   copyRotateFormOpen=true;
   if(!rotInitialized){
     const ids=new Set(); selectedElements().forEach(e=>{ ids.add(e.n1); ids.add(e.n2); });
     setTransformDefaults(Array.from(ids),'rotate');
   }
-  renderSidebar();
+  renderSidebar(); render();
 }
-function closeCopyRotateForm(){ copyRotateFormOpen=false; renderSidebar(); }
+function closeCopyRotateForm(){ copyRotateFormOpen=false; renderSidebar(); render(); }
 function copyRotateFormHtml(){
   return rotateFormFields('confirmCopyRotate()','closeCopyRotateForm()').replace('Obróć</button>','Kopiuj z obrotem</button>');
 }
@@ -7886,15 +8419,15 @@ let copyMirrorFormOpen=false;
 function openCopyMirrorForm(){
   const wasOpen=copyMirrorFormOpen;
   closeAllInlineForms();
-  if(wasOpen){ renderSidebar(); return; }
+  if(wasOpen){ renderSidebar(); render(); return; }
   copyMirrorFormOpen=true;
   if(!mirInitialized){
     const ids=new Set(); selectedElements().forEach(e=>{ ids.add(e.n1); ids.add(e.n2); });
     setTransformDefaults(Array.from(ids),'mirror');
   }
-  renderSidebar();
+  renderSidebar(); render();
 }
-function closeCopyMirrorForm(){ copyMirrorFormOpen=false; renderSidebar(); }
+function closeCopyMirrorForm(){ copyMirrorFormOpen=false; renderSidebar(); render(); }
 function copyMirrorFormHtml(){
   return mirrorFormFields('confirmCopyMirror()','closeCopyMirrorForm()').replace('Odbij</button>','Kopiuj z odbiciem</button>');
 }
@@ -7925,14 +8458,14 @@ let nodeRotateFormOpen=false, nodeMirrorFormOpen=false;
 function openNodeRotateForm(){
   const wasOpen=nodeRotateFormOpen;
   closeAllInlineForms();
-  if(wasOpen){ renderSidebar(); return; }
+  if(wasOpen){ renderSidebar(); render(); return; }
   nodeRotateFormOpen=true;
   if(!rotInitialized){
     setTransformDefaults(selectedNodes().map(n=>n.id),'rotate');
   }
-  renderSidebar();
+  renderSidebar(); render();
 }
-function closeNodeRotateForm(){ nodeRotateFormOpen=false; renderSidebar(); }
+function closeNodeRotateForm(){ nodeRotateFormOpen=false; renderSidebar(); render(); }
 function nodeRotateFormHtml(){ return rotateFormFields('confirmNodeRotate()','closeNodeRotateForm()'); }
 function confirmNodeRotate(){
   const ids=selectedNodes().map(n=>n.id);
@@ -7968,14 +8501,14 @@ function confirmNodeRotate(){
 function openNodeMirrorForm(){
   const wasOpen=nodeMirrorFormOpen;
   closeAllInlineForms();
-  if(wasOpen){ renderSidebar(); return; }
+  if(wasOpen){ renderSidebar(); render(); return; }
   nodeMirrorFormOpen=true;
   if(!mirInitialized){
     setTransformDefaults(selectedNodes().map(n=>n.id),'mirror');
   }
-  renderSidebar();
+  renderSidebar(); render();
 }
-function closeNodeMirrorForm(){ nodeMirrorFormOpen=false; renderSidebar(); }
+function closeNodeMirrorForm(){ nodeMirrorFormOpen=false; renderSidebar(); render(); }
 function nodeMirrorFormHtml(){ return mirrorFormFields('confirmNodeMirror()','closeNodeMirrorForm()'); }
 function confirmNodeMirror(){
   const ids=selectedNodes().map(n=>n.id);
@@ -9776,6 +10309,10 @@ function init(){
   ctx=canvas.getContext('2d');
   buildToolbar();
   initEvents();
+  if(isTouchInput){
+    const coordsEl = document.getElementById('coords');
+    if(coordsEl) coordsEl.textContent = '';
+  }
   fitView();
   resizeCanvas();
   setMode('select');
