@@ -2550,8 +2550,8 @@ function normalizeAngle(a){ a = a%360; if(a>180) a-=360; if(a<=-180) a+=360; ret
    with a "różne" (mixed) placeholder instead of a value, same convention as numInputAttrs(). */
 function pairRow(l1,val1,step1,unit1,onchange1,l2,val2,step2,unit2,onchange2){
   return `<div class="row-pair">
-    <div class="half"><label>${l1}</label><div class="inp-unit"><input type="number" step="${step1}" ${numInputAttrs(val1)} oninput="${onchange1}" onchange="${onchange1}"><span class="unit">${unit1}</span></div></div>
-    <div class="half"><label>${l2}</label><div class="inp-unit"><input type="number" step="${step2}" ${numInputAttrs(val2)} oninput="${onchange2}" onchange="${onchange2}"><span class="unit">${unit2}</span></div></div>
+    <div class="half"><label>${l1}</label><div class="inp-unit"><input type="number" step="${step1}" ${numInputAttrs(val1)} onchange="${onchange1}"><span class="unit">${unit1}</span></div></div>
+    <div class="half"><label>${l2}</label><div class="inp-unit"><input type="number" step="${step2}" ${numInputAttrs(val2)} onchange="${onchange2}"><span class="unit">${unit2}</span></div></div>
   </div>`;
 }
 /* angle nudge (+45/-45) buttons; fnName is expected to read the current selection itself
