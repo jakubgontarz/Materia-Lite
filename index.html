@@ -380,14 +380,52 @@ function invSmall(A){
   return M.map(row=>row.slice(n));
 }
 function solveLinSys(Ain,bin){
+  // Gaussian elimination with SCALED partial pivoting.
+  //
+  // Plain partial pivoting (old version) compares raw pivot-column magnitudes
+  // across rows. That works fine when every row of the matrix has roughly the
+  // same magnitude, but structural stiffness matrices that mix very short
+  // "dummy"/rigid-link elements with normal-sized members can have rows that
+  // differ by many orders of magnitude (here: ~1e12 vs ~1e5-1e6). With plain
+  // pivoting, whether a given pivot choice/round-off pattern flips a
+  // borderline DOF to "singular" becomes sensitive to the exact order of
+  // floating-point summation performed while assembling/multiplying the
+  // matrices — which can differ subtly between JS engines (different
+  // optimization tiers, SIMD/FMA use, summation order in loops), even though
+  // all of them are IEEE754-compliant. That is what produced the "0
+  // displacement at an unsupported node" symptom on Soul/Smooze Browser.
+  //
+  // Scaled partial pivoting instead picks, at each step, the row whose pivot
+  // candidate is largest RELATIVE TO THAT ROW'S OWN largest entry. This makes
+  // the elimination's numerical behavior depend on the matrix's relative
+  // conditioning rather than on absolute magnitudes, which is dramatically
+  // more robust when the matrix mixes wildly different stiffness scales, and
+  // leaves far more margin before rounding differences can change the result.
   const n=Ain.length; const A=Ain.map(r=>r.slice()); const b=bin.slice();
   let singular=false;
+
+  // one scale factor per row = largest |entry| in that row (computed once,
+  // before elimination starts, as is standard for scaled partial pivoting)
+  const scale=A.map(row=>{
+    let m=0;
+    for(let j=0;j<n;j++) m=Math.max(m, Math.abs(row[j]));
+    return m||1;
+  });
+
   for(let col=0;col<n;col++){
-    let piv=col;
-    for(let r=col+1;r<n;r++) if(Math.abs(A[r][col])>Math.abs(A[piv][col])) piv=r;
-    if(Math.abs(A[piv][col])<1e-9){ singular=true; continue; }
-    const tmpA=A[col];A[col]=A[piv];A[piv]=tmpA;
-    const tmpb=b[col];b[col]=b[piv];b[piv]=tmpb;
+    let piv=col, best=Math.abs(A[col][col])/scale[col];
+    for(let r=col+1;r<n;r++){
+      const cand=Math.abs(A[r][col])/scale[r];
+      if(cand>best){ best=cand; piv=r; }
+    }
+    // relative (dimensionless) singularity threshold instead of an absolute
+    // 1e-9 — appropriate regardless of the matrix's overall magnitude
+    if(best<1e-12){ singular=true; continue; }
+    if(piv!==col){
+      const tmpA=A[col];A[col]=A[piv];A[piv]=tmpA;
+      const tmpb=b[col];b[col]=b[piv];b[piv]=tmpb;
+      const tmpS=scale[col];scale[col]=scale[piv];scale[piv]=tmpS;
+    }
     const pv=A[col][col];
     for(let j=col;j<n;j++) A[col][j]/=pv;
     b[col]/=pv;
@@ -399,6 +437,38 @@ function solveLinSys(Ain,bin){
     }
   }
   return {x:b, singular};
+}
+
+function autoLockZeroStiffnessDofs(Kmat, nDof, isFixed, fixedValue){
+  // Auto-locks DOFs whose OWN connected stiffness is (numerically) zero —
+  // e.g. a rotation DOF where every framing member has a hinge at that node.
+  //
+  // The old version compared each diagonal entry to a tolerance derived from
+  // the LARGEST diagonal entry in the WHOLE matrix (maxDiag). That is a
+  // problem as soon as the model also contains very stiff and/or very short
+  // elements elsewhere (rigid links, "cut" tricks for influence-line/virtual
+  // work devices, etc.): they inflate maxDiag, which inflates the tolerance,
+  // which can then wrongly swallow the real, physically meaningful stiffness
+  // of an unrelated, normal-sized DOF and lock it to zero.
+  //
+  // Fix: use a LOCAL, per-row tolerance based on the largest entry in THAT
+  // DOF's own row (i.e. the stiffness actually connected to it), not the
+  // global matrix maximum. A node's rotation DOF is only "free-floating"
+  // if nothing connected to IT has real stiffness — unrelated stiff elements
+  // elsewhere in the structure should not affect that decision.
+  const rowScale=new Array(nDof).fill(0);
+  for(let i=0;i<nDof;i++){
+    let m=0;
+    for(let j=0;j<nDof;j++) m=Math.max(m, Math.abs(Kmat[i][j]));
+    rowScale[i]=m;
+  }
+  for(let i=0;i<nDof;i++){
+    const tol=Math.max(rowScale[i],1)*1e-9;
+    if(!isFixed[i] && Math.abs(Kmat[i][i])<tol){
+      isFixed[i]=true;
+      if(fixedValue) fixedValue[i]=0;
+    }
+  }
 }
 
 const GAUSS5={pts:[-0.9061798459386640,-0.5384693101056831,0,0.5384693101056831,0.9061798459386640],
@@ -582,12 +652,7 @@ function solveModel(model){
   // leaving that node's rotation physically disconnected from the rest of the
   // structure (no meaning of its own — each member's own rotation is recovered
   // separately via condensation) — without this it would falsely look singular.
-  let maxDiag=0;
-  for(let i=0;i<nDof;i++) maxDiag=Math.max(maxDiag, Math.abs(Kp[i][i]));
-  const floatTol = Math.max(maxDiag,1)*1e-9;
-  for(let i=0;i<nDof;i++){
-    if(!isFixed[i] && Math.abs(Kp[i][i])<floatTol){ isFixed[i]=true; fixedValue[i]=0; }
-  }
+  autoLockZeroStiffnessDofs(Kp, nDof, isFixed, fixedValue);
   for(let i=0;i<nDof;i++){ if(isFixed[i]) fixedIdx.push(i); else freeIdx.push(i); }
   const Kff=freeIdx.map(i=>freeIdx.map(j=>Kp[i][j]));
   const Kfc=freeIdx.map(i=>fixedIdx.map(j=>Kp[i][j]));
@@ -924,12 +989,7 @@ function solveStability(model, maxModes=4){
     });
   });
 
-  let maxDiag = 0;
-  for(let i=0; i<nDof; i++) maxDiag = Math.max(maxDiag, Math.abs(Kp[i][i]));
-  const floatTol = Math.max(maxDiag, 1) * 1e-9;
-  for(let i=0; i<nDof; i++){
-    if(!isFixed[i] && Math.abs(Kp[i][i]) < floatTol){ isFixed[i] = true; }
-  }
+  autoLockZeroStiffnessDofs(Kp, nDof, isFixed, null);
 
   const freeIdx = [];
   for(let i=0; i<nDof; i++){ if(!isFixed[i]) freeIdx.push(i); }
@@ -952,6 +1012,8 @@ function solveStability(model, maxModes=4){
   let L = cholesky(Kff);
   if(!L){
     // regularize slightly if boundary between stable/singular
+    let maxDiag = 0;
+    for(let i=0; i<nFree; i++) maxDiag = Math.max(maxDiag, Math.abs(Kff[i][i]));
     const regKff = Kff.map((row, i) => row.map((v, j) => (i===j ? v + 1e-7 * maxDiag : v)));
     L = cholesky(regKff);
     if(!L){
@@ -1204,12 +1266,7 @@ function solveModal(model, maxModes=4, options={}){
     });
   });
 
-  let maxDiag = 0;
-  for(let i = 0; i < nDof; i++) maxDiag = Math.max(maxDiag, Math.abs(Kp[i][i]));
-  const floatTol = Math.max(maxDiag, 1) * 1e-9;
-  for(let i = 0; i < nDof; i++){
-    if(!isFixed[i] && Math.abs(Kp[i][i]) < floatTol){ isFixed[i] = true; }
-  }
+  autoLockZeroStiffnessDofs(Kp, nDof, isFixed, null);
 
   const freeIdx = [];
   for(let i = 0; i < nDof; i++){ if(!isFixed[i]) freeIdx.push(i); }
@@ -1232,6 +1289,8 @@ function solveModal(model, maxModes=4, options={}){
   // 5. Cholesky factorization of Kff = L L^T
   let L = cholesky(Kff);
   if(!L){
+    let maxDiag = 0;
+    for(let i=0; i<Kff.length; i++) maxDiag = Math.max(maxDiag, Math.abs(Kff[i][i]));
     const regKff = Kff.map((row, i) => row.map((v, j) => (i === j ? v + 1e-7 * maxDiag : v)));
     L = cholesky(regKff);
     if(!L){
@@ -1569,12 +1628,7 @@ function solveHarmonic(model, freqHz=1.0, options={}){
     });
   });
 
-  let maxDiag = 0;
-  for(let i = 0; i < nDof; i++) maxDiag = Math.max(maxDiag, Math.abs(Kdyn_p[i][i]));
-  const floatTol = Math.max(maxDiag, 1) * 1e-9;
-  for(let i = 0; i < nDof; i++){
-    if(!isFixed[i] && Math.abs(Kdyn_p[i][i]) < floatTol){ isFixed[i] = true; fixedValue[i] = 0; }
-  }
+  autoLockZeroStiffnessDofs(Kdyn_p, nDof, isFixed, fixedValue);
 
   const freeIdx = [], fixedIdx = [];
   for(let i = 0; i < nDof; i++){ if(isFixed[i]) fixedIdx.push(i); else freeIdx.push(i); }
@@ -1729,12 +1783,7 @@ function solveInfluenceLine(model, targetElId, end, forceType){
   });
 
   const freeIdx=[], fixedIdx=[];
-  let maxDiag=0;
-  for(let i=0;i<nDof;i++) maxDiag=Math.max(maxDiag, Math.abs(Kp[i][i]));
-  const floatTol = Math.max(maxDiag,1)*1e-9;
-  for(let i=0;i<nDof;i++){
-    if(!isFixed[i] && Math.abs(Kp[i][i])<floatTol){ isFixed[i]=true; fixedValue[i]=0; }
-  }
+  autoLockZeroStiffnessDofs(Kp, nDof, isFixed, fixedValue);
   for(let i=0;i<nDof;i++){ if(isFixed[i]) fixedIdx.push(i); else freeIdx.push(i); }
   const Kff=freeIdx.map(i=>freeIdx.map(j=>Kp[i][j]));
   const Kfc=freeIdx.map(i=>fixedIdx.map(j=>Kp[i][j]));
@@ -1846,12 +1895,7 @@ function solveEnvelope(model, options){
     });
   });
 
-  let maxDiag = 0;
-  for(let i = 0; i < nDof; i++) maxDiag = Math.max(maxDiag, Math.abs(Kp[i][i]));
-  const floatTol = Math.max(maxDiag, 1) * 1e-9;
-  for(let i = 0; i < nDof; i++){
-    if(!isFixed[i] && Math.abs(Kp[i][i]) < floatTol){ isFixed[i] = true; }
-  }
+  autoLockZeroStiffnessDofs(Kp, nDof, isFixed, null);
 
   const freeIdx = [], fixedIdx = [];
   for(let i = 0; i < nDof; i++){ if(isFixed[i]) fixedIdx.push(i); else freeIdx.push(i); }
@@ -6098,8 +6142,25 @@ function confirmExport(){
   };
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download=fileName; a.click();
-  URL.revokeObjectURL(url);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=fileName;
+  a.rel='noopener';
+  // Two cross-browser gotchas that Chrome/Firefox tolerate but some niche
+  // Android browser forks (e.g. Soul/Smooze) do not:
+  // 1) an <a> that was never attached to the document can have its .click()
+  //    silently ignored by the browser's download handling instead of
+  //    triggering the native "save file" flow;
+  // 2) revoking the blob: URL synchronously, right after .click(), can race
+  //    with browsers that pick up the download asynchronously — the URL is
+  //    already invalid by the time they try to read it, so nothing happens
+  //    and no error is shown.
+  // Attaching the anchor to the DOM and delaying the revoke fixes both,
+  // without changing behavior in browsers that already worked.
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
   savedSnapshot = modelSnapshot();
   setStatusHint(`Pobrano plik: ${fileName}`);
 }
