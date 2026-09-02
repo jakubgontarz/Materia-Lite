@@ -10415,5 +10415,121 @@ function init(){
 }
 window.addEventListener('DOMContentLoaded', init);
 </script>
+
+<!-- ============================= STORAGE NOTICE BANNER ============================= -->
+<style>
+  #storageNoticeBanner{
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    width: calc(100% - 32px);
+    max-width: 680px;
+    background: var(--toolbar-bg, #1b2430);
+    color: var(--toolbar-fg, #e8edf3);
+    border: 1px solid var(--surface-border, rgba(255,255,255,0.15));
+    border-radius: 12px;
+    padding: 12px 16px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    backdrop-filter: blur(8px);
+    font-size: 12.5px;
+    line-height: 1.4;
+    font-family: var(--sans);
+    animation: fadeInUpNotice .3s ease-out forwards;
+  }
+  @keyframes fadeInUpNotice{
+    from{ opacity:0; transform: translate(-50%, 16px); }
+    to{ opacity:1; transform: translate(-50%, 0); }
+  }
+  #storageNoticeBanner .storage-notice-wrap{
+    display:flex; align-items:center; gap:12px; flex:1;
+  }
+  #storageNoticeBanner .storage-notice-icon{
+    flex-shrink:0; width:32px; height:32px; border-radius:8px;
+    background: var(--accent-soft, rgba(37,99,235,.2));
+    color: var(--accent, #3b82f6);
+    display:flex; align-items:center; justify-content:center;
+  }
+  #storageNoticeBanner .storage-notice-text{ flex:1; color: var(--toolbar-fg, #e8edf3); }
+  #storageNoticeBanner .storage-notice-text b{ color:#ffffff; }
+  #storageNoticeBanner .storage-notice-btn{
+    flex-shrink:0;
+    background: var(--accent, #2563eb);
+    color:#ffffff; border:none; border-radius:8px;
+    padding:8px 18px; font-size:13px; font-weight:600;
+    cursor:pointer; white-space:nowrap;
+    box-shadow: 0 2px 6px rgba(37,99,235,.4);
+    transition: all .15s ease;
+  }
+  #storageNoticeBanner .storage-notice-btn:hover{
+    background: var(--accent-dark, #1d4ed8);
+    transform: translateY(-1px);
+  }
+  @media (max-width:520px){
+    #storageNoticeBanner .storage-notice-wrap{
+      flex-direction:column; align-items:flex-start !important; gap:10px !important;
+    }
+    #storageNoticeBanner .storage-notice-btn{ width:100%; justify-content:center; }
+  }
+</style>
+
+<div id="storageNoticeBanner" style="display:none;">
+  <div class="storage-notice-wrap">
+    <div class="storage-notice-icon">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+      </svg>
+    </div>
+    <div class="storage-notice-text">
+      <b>Pamięć przeglądarki: </b>Aplikacja wykorzystuje lokalną pamięć przeglądarki (localStorage) do
+      zapisywania Twoich projektów, ustawień i stanu pracy bezpośrednio na urządzeniu. Dane nie są
+      wysyłane na żaden zewnętrzny serwer.
+    </div>
+  </div>
+  <button class="storage-notice-btn" id="storageNoticeBtn" type="button">Rozumiem</button>
+</div>
+
+<script>
+(function(){
+  var STORAGE_NOTICE_ACK_KEY = 'materia_lite_storage_notice_ack';
+  try {
+    if (localStorage.getItem(STORAGE_NOTICE_ACK_KEY) === 'true') return;
+
+    // Nie pokazuj banera, jeśli w przeglądarce zapisane są już jakiekolwiek dane programu
+    // (zapisane modele lub ustawienia użytkownika) — wtedy użytkownik już z niego korzystał.
+    var hasSavedModels = false;
+    try {
+      if (typeof getStoredModelsList === 'function') {
+        hasSavedModels = getStoredModelsList().length > 0;
+      } else {
+        var rawModels = localStorage.getItem(typeof STORAGE_MODELS_KEY !== 'undefined' ? STORAGE_MODELS_KEY : 'materia_lite_saved_models');
+        hasSavedModels = !!(rawModels && JSON.parse(rawModels).length);
+      }
+    } catch(e){}
+
+    var hasOptions = !!localStorage.getItem(typeof STORAGE_OPTIONS_KEY !== 'undefined' ? STORAGE_OPTIONS_KEY : 'materia_lite_user_options');
+
+    if (hasSavedModels || hasOptions) return;
+
+    var banner = document.getElementById('storageNoticeBanner');
+    if (!banner) return;
+    banner.style.display = 'flex';
+
+    document.getElementById('storageNoticeBtn').addEventListener('click', function(){
+      try { localStorage.setItem(STORAGE_NOTICE_ACK_KEY, 'true'); } catch(e){}
+      banner.style.display = 'none';
+    });
+  } catch(e){
+    console.warn('Nie można sprawdzić localStorage dla baneru informacyjnego', e);
+  }
+})();
+</script>
 </body>
 </html>
