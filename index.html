@@ -8987,7 +8987,7 @@ function panelResults(){
   if(solved.type === 'envelope'){
     return panelEnvelopeResults();
   }
-  let html = `<div class="panel"><h3>Reakcje podporowe <span class="tag">rozwiązano</span></h3>`;
+  let html = `<div class="panel"><h3>Reakcje podporowe</h3>`;
   if(solveWarning) html += `<div class="warn">${solveWarning}</div>`;
   html += reactionsTableHtml();
   html += `</div>`;
@@ -9016,7 +9016,7 @@ function panelEnvelopeResults(){
   }
 
   let html = `<div class="panel">
-    <h3>Obwiednia sił <span class="tag">Ruchoma siła</span></h3>
+    <h3>Obwiednia sił</h3>
     ${solveWarning ? `<div class="warn">${solveWarning}</div>` : ''}
     <div class="muted" style="line-height:1.4;">
       Obciążenie ruchome: siła pionowa <b>P = ${fmtSmart(solved.loadP)} kN ↓</b>, ${solved.totalSteps} położeń na prętach.
@@ -9028,7 +9028,7 @@ function panelEnvelopeResults(){
   </div>
 
   <div class="panel">
-    <h3>Reakcje podporowe <span class="tag">Ekstrema</span></h3>
+    <h3>Reakcje podporowe</h3>
     <div class="row" style="margin-bottom:8px;">
       <label>Wykres reakcji</label>
       <select onchange="setEnvelopeReactionMode(this.value)">
@@ -9077,7 +9077,7 @@ function panelHarmonicResults(){
   const hasG = !!solved.includeGravity;
 
   let html = `<div class="panel">
-    <h3>Drgania wymuszone <span class="tag">Harmoniczna</span></h3>
+    <h3>Drgania wymuszone</h3>
     ${solveWarning ? `<div class="warn">${solveWarning}</div>` : ''}
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:baseline;">
@@ -9100,7 +9100,7 @@ function panelHarmonicResults(){
   </div>
 
   <div class="panel">
-    <h3>Stan skrajny <span class="tag">Kombinacja</span></h3>
+    <h3>Stan skrajny</h3>
     <div class="muted" style="margin-bottom:8px;line-height:1.4;">
       Wybierz stan superpozycji siły statycznej, bezwładności i grawitacji:
     </div>
@@ -9132,7 +9132,7 @@ function panelHarmonicResults(){
   </div>
 
   <div class="panel">
-    <h3>Reakcje podporowe <span class="tag">${curCfg.shortName}${hasG&&curCfg.sGrav?'+G':''}</span></h3>
+    <h3>Reakcje podporowe</h3>
     ${reactionsTableHtml()}
   </div>
 
@@ -9175,7 +9175,7 @@ function panelInfluenceResults(){
     </div>`;
   }
   let html = `<div class="panel">
-    <h3>Linia wpływu <span class="tag">rozwiązano</span></h3>
+    <h3>Linia wpływu</h3>
     ${solveWarning ? `<div class="warn">${solveWarning}</div>` : ''}
     <div class="muted" style="line-height:1.4;">
       Przekrój: pręt <b>P${solved.ilElementId}</b>, ${endLbl}. Rzędna linii wpływu w danym punkcie to wartość siły w przekroju wywołana jednostkowym obciążeniem poprzecznym (prostopadłym do pręta) przyłożonym w tym punkcie — realny efekt dla obciążenia P uzyskuje się mnożąc rzędną przez P.
@@ -9209,7 +9209,7 @@ function panelModalResults(){
 
   return `
   <div class="panel">
-    <h3>Drgania własne <span class="tag">Modalna</span></h3>
+    <h3>Drgania własne</h3>
     ${solveWarning ? `<div class="warn">${solveWarning}</div>` : ''}
     
     <div class="card">
@@ -9307,7 +9307,7 @@ function panelStabilityResults(){
 
   return `
   <div class="panel">
-    <h3>Stateczność <span class="tag">Wyboczenie</span></h3>
+    <h3>Stateczność</h3>
     ${solveWarning ? `<div class="warn">${solveWarning}</div>` : ''}
     
     <div class="card">
@@ -9433,7 +9433,7 @@ function probePanelHtml(){
   const isEnvelope = solved && solved.type==='envelope';
   const hasData = isEnvelope ? (solved.envelopeData && !!solved.envelopeData[probe.elId]) : (isInfluence ? (ilDiagrams && !!ilDg(probe.elId)) : (diagrams && !!diagrams[probe.elId]));
   const readoutHtml = hasData ? probeReadoutHtml() : '<div class="muted">Uruchom obliczenia, aby odczytać dokładne wyniki.</div>';
-  return `<div class="panel"><h3>Sonda wyników <span class="tag">dokładny odczyt</span></h3>
+  return `<div class="panel"><h3>Sonda wyników</h3>
     <div class="row"><label>Pręt</label><select id="probeElSel" onchange="setProbeElement(parseInt(this.value))">${options}</select></div>
     <div class="row"><label>Pozycja x</label><input type="range" id="probeSlider" min="0" max="100" step="0.5" value="${probe.t*100}" oninput="setProbeT(this.value/100)"><span class="unit" id="probeXLbl" style="width:56px;">${fmt(probe.t*L,2)} m</span></div>
     <div id="probeReadout">${readoutHtml}</div>
